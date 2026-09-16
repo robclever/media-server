@@ -6,5 +6,5 @@
 __pycache__/
 *.pyc
 compose.override.yaml
-
+MYSERVER.md
 backups/
