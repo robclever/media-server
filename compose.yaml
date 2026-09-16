@@ -1,0 +1,23 @@
+services:
+  app:
+    image: ${PLEX_IMAGE:-custom-plex:local}
+    build: .
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      APP_BIND: 0.0.0.0:8080
+      MEDIA_DIR: /media
+      MEDIA_SOURCES: ${MEDIA_SOURCES:-}
+      DATA_DIR: /data
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    volumes:
+      - ${HOST_MEDIA_DIR:-./media}:/media:ro
+      - ${HOST_DATA_DIR:-./data}:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

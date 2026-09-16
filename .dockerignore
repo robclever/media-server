@@ -1,0 +1,7 @@
+target
+.git
+data
+media
+.env
+
+backups/
