@@ -1,0 +1,11 @@
+# Copy to compose.override.yaml, then set MEDIA_SOURCES and HOST_ARCHIVE_DIR in .env.
+# The default /media and /data mounts from compose.yaml remain in place.
+services:
+  app:
+    volumes:
+      - type: bind
+        source: ${HOST_ARCHIVE_DIR:?Set HOST_ARCHIVE_DIR to an existing host folder}
+        target: /media-archive
+        read_only: true
+        bind:
+          create_host_path: false
