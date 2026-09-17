@@ -1,0 +1,28 @@
+GNU Affero General Public License v3.0
+
+Copyright (C) [YEAR] [COPYRIGHT HOLDER]]
+Licensed under the Apache License, Version 2.0 (the License);
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+as well as the full text of the GNU Affero General Public License v3.0 here:
+https://opensource.org/licenses/AGPL-3.0
+
+The Software provided by this file is subject to the terms of the GNU 
+Affero General Public License v3.0 (License). Unless required by applicable law or 
+additional agreement, you may not use this file except in compliance with the License and 
+the other applicable agreements attached hereto.
+
+Copyright (C) [YEAR] [COPYRIGHT HOLDER]
+
+Permitted Use:
+This software is free software, meaning that you are free to:
+1. Program, study, modify, and distribute this program;
+2. Give non-source versions of the program to others, provided that such distribution complies with the terms of the License.
+
+Core Concepts of AGPLv3 (Summary for clarity):
+The AGPL extends the copyleft principles beyond simple distribution, ensuring that if you run this software over a network (like hosting it as a media server), the source code must still be available to all connected users under the terms of this license.
+
+Disclaimer:
+THIS IS A STANDARD LICENSING TEXT. While this version is accurate for AGPLv3, remember I am an AI and not a lawyer. Please confirm that you have correctly updated the [YEAR] and [COPYRIGHT HOLDER] information before finalizing usage.

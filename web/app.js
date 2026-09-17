@@ -29,6 +29,15 @@ function render() {
     const card = document.createElement('article'); card.className = 'movie';
     const play = document.createElement('button'); play.className = 'play';
     const cover = document.createElement('span'); cover.className = 'cover'; cover.textContent = '▶'; cover.setAttribute('aria-hidden','true');
+    function refreshCover() {
+      const picture = document.createElement('img'); picture.alt = ''; picture.loading = 'lazy';
+      picture.onload = () => cover.replaceChildren(picture);
+      picture.onerror = () => { cover.textContent = '▶'; };
+      picture.src = `/api/movies/${movie.id}/cover?v=${Date.now()}`;
+      // Attach immediately so native lazy loading can observe the image's position.
+      cover.replaceChildren(picture);
+    }
+    refreshCover();
     const title = document.createElement('h2'); title.textContent = movie.title;
     play.append(cover, title); play.setAttribute('aria-label', `Play ${movie.title}`);
     play.onclick = () => { returnFocus = play; $('playing-title').textContent = movie.title; $('playback-error').hidden = true; $('video').src = `/media/${movie.id}`; $('player').showModal(); $('video').focus(); $('video').play().catch(() => {}); };
@@ -42,6 +51,35 @@ function render() {
       approval.onclick = async () => { try { await api(`/api/movies/${movie.id}/approval`, {approved: !movie.approved}); movie.approved = !movie.approved; approval.textContent = movie.approved ? '✓ Available to Baby' : '+ Add to Baby'; approval.setAttribute('aria-pressed', String(movie.approved)); } catch(error) { report(error); } };
       card.append(approval);
     }
+    const imageActions = document.createElement('div'); imageActions.className = 'image-actions';
+    const choose = document.createElement('button'); choose.textContent = 'Add / change image';
+    choose.setAttribute('aria-label', `Add or change image for ${movie.title}`);
+    const automatic = document.createElement('button'); automatic.textContent = 'Use automatic image';
+    automatic.setAttribute('aria-label', `Use automatic image for ${movie.title}`);
+    const picker = document.createElement('input'); picker.type = 'file'; picker.accept = 'image/jpeg,image/png,image/webp'; picker.hidden = true;
+    choose.onclick = () => picker.click();
+    async function changeCover(file) {
+      if (file && file.size > 8 * 1024 * 1024) { report(new Error('Choose an image smaller than 8 MiB.')); return; }
+      choose.disabled = automatic.disabled = true;
+      $('status').textContent = file ? `Saving image for ${movie.title}…` : `Finding an automatic image for ${movie.title}…`;
+      try {
+        const result = await fetch(`/api/movies/${movie.id}/cover`, {
+          method: file ? 'POST' : 'DELETE', headers: {'X-Requested-With': 'custom-plex', ...(file ? {'Content-Type': file.type || 'application/octet-stream'} : {})},
+          body: file || undefined
+        });
+        if (!result.ok) {
+          if (result.status === 415) throw new Error('Use a valid JPEG, PNG, or WebP image, at most 8192 pixels per side.');
+          if (result.status === 413) throw new Error('Choose an image smaller than 8 MiB.');
+          throw new Error(`Could not change the image (${result.status}). Refresh the library and try again.`);
+        }
+        refreshCover();
+        $('status').textContent = file ? `Image saved for ${movie.title}.` : `Automatic image selected for ${movie.title}. A placeholder remains if no frame is available.`;
+      } catch (error) { report(error); }
+      finally { choose.disabled = automatic.disabled = false; picker.value = ''; }
+    }
+    picker.onchange = () => { if (picker.files[0]) changeCover(picker.files[0]); };
+    automatic.onclick = () => changeCover(null);
+    imageActions.append(choose, automatic, picker); card.append(imageActions);
     $('movies').append(card);
   }
 }

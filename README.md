@@ -47,7 +47,7 @@ For a TV on the same home network, use `http://<this-macs-lan-ip>:8080`, not `lo
 - Docker Compose with persistent data, read-only media, health checks, and automatic restarts.
 - GitHub Actions configuration for Rust checks, native AMD64/ARM64 container tests, and versioned image publishing.
 
-No DVD ripping, live transcoding, downloaded posters, external subtitles, native TV app, or internet-facing deployment is included. Titles come from filenames; movie cards use built-in artwork.
+No DVD ripping, live transcoding, online poster lookup, external subtitles, native TV app, or internet-facing deployment is included. Titles come from filenames; covers use uploaded images, matching local artwork, or automatically extracted movie frames.
 
 ## Quick start: local Rust development
 
@@ -204,6 +204,41 @@ Click **Add to Baby** for an approved movie, then switch to Baby to check that i
 - **Replace at the same path:** the existing approval remains. Revoke Baby approval before replacing content if it should be reviewed again.
 - **Remove:** move the file outside the media folder or delete it, then scan. Its card disappears. Stored database entries are retained, so reintroducing the exact same path restores its previous approval.
 - **Missing after a scan:** check that the copy completed, its final extension is supported, it is inside the configured folder, it is not a symlink, and the container can read it. Then check whether you are viewing Baby or Parents.
+
+## Movie cover images
+
+Every movie card has **Add / change image** and **Use automatic image** buttons. Both Baby and Parents may change the image of a movie they can see. Baby cannot view or change images for parents-only movies. Cover changes are shared across devices and do not change a movie's Baby approval.
+
+### Upload an image
+
+1. Open the catalog and find the movie.
+2. Click **Add / change image** and choose a JPEG, PNG, or WebP from your computer or phone.
+3. Wait for the image-saved message. The new image replaces the catalog placeholder or automatic cover.
+
+The maximum upload is 8 MiB, with at most 8192 pixels on either side and a bounded decoding memory budget. Large images that exceed the decoding budget are also rejected. SVG, GIF, and HEIC are not supported; export a JPEG or PNG first. Images are decoded, resized to fit within 640 × 640 pixels, and stored as JPEGs, rather than served as arbitrary uploaded files. The original media directory remains read-only.
+
+### Automatic image selection
+
+When no uploaded image exists, the server checks, in order:
+
+1. An image with the **same filename stem beside the video**, checking `.jpg`, `.jpeg`, `.png`, then `.webp` (lowercase extensions). For example, `Finding Nemo (2003).mp4` can use `Finding Nemo (2003).jpg` in the same directory. This works in each configured storage location; matching names on different drives remain independent.
+2. A video frame at approximately 10 seconds, or the beginning if the video is too short.
+3. The existing play-symbol placeholder if neither artwork nor a decodable frame is available.
+
+Images are generated on demand as cards enter view, so the first load may take a little time. Work is serialized to limit load on the Pi, with a 20-second timeout per extraction attempt. Results are cached in SQLite. If the video or matching image changes its size or modification timestamp, its automatic cover is refreshed on the next request. Unusable-image/frame results can be retried with **Use automatic image**.
+
+**Use automatic image** deletes the saved cover/cache for that movie and repeats the order above. It does not remove a matching image from the media folder; remove or rename that image yourself if you specifically want a movie frame instead. It never deletes the video. To see another device's image change, refresh the catalog.
+
+FFmpeg is included in the Docker image. For native Rust development, install FFmpeg separately and ensure `ffmpeg` is on the server process's `PATH`; uploads and matching images still work without it, but frame extraction cannot. This feature does not perform playback transcoding or download posters from external services.
+
+Uploaded and generated images live in the `covers` table in `DATA_DIR/library.sqlite3`, so existing data backups include them. Cover records use the movie ID and survive rescans and container recreation. Deleted/removed library entries retain their cached cover if later restored, just as they retain approvals. The schema change is additive.
+
+For an existing Docker deployment, rebuild/pull an image with this feature and recreate the container. Local build:
+
+```sh
+docker compose build
+docker compose up -d --no-build --pull never --wait
+```
 
 ## Configure additional storage locations
 
@@ -525,6 +560,8 @@ To restore the default data path, stop the service, move the current `data` dire
 | `.local` address fails | Use the Pi IP address. |
 
 ## Validation status
+
+Cover-image update (September 17, 2026): all eight Rust integration tests and Clippy passed. ARM64 Docker checks verified FFmpeg frame extraction, anonymous image upload for approved movies, persistence across recreation, reset to automatic imagery, and access denial after approval revocation. Browser checks verified Baby's file picker, successful upload and immediate image display, plus automatic cover reset. GitHub Actions runs the extended container checks on its next run; this change has not yet been deployed to the physical Pi.
 
 The multiple-location update passed all six Rust integration tests, formatting, Clippy, and the isolated ARM64 Docker test for distinct streams, approvals, recreation, and source removal. The running local server was updated after a database backup under `backups/before-multisource-20260916T183703Z/data`. That backup is excluded from Git and Docker build context; retain it for rollback to the original schema. No additional personal storage paths are enabled until you configure them.
 
