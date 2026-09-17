@@ -9,6 +9,7 @@ This is a standalone Plex-like application. It does not use official Plex client
 - **Try it on this Mac:** follow [Tomorrow's local test](#tomorrows-local-test).
 - **Put it on the Pi now, without GitHub:** follow [Deploy from source](#deploy-from-source-no-published-image-needed), after preparing Docker on the Pi.
 - **Update the existing Pi from this Mac:** run `python3 scripts/deploy_pi.py`; see [Deploy updates from your Mac](#deploy-updates-from-your-mac).
+- **Create photo albums:** see [Photo Album](#photo-album) for uploads and external-drive storage.
 - **Add your movies:** follow [Add movies step by step](#add-movies-step-by-step).
 - **Deploy a future published release:** use the numbered [Raspberry Pi deployment instructions](#deploy-on-a-raspberry-pi).
 
@@ -40,6 +41,7 @@ For a TV on the same home network, use `http://<this-macs-lan-ip>:8080`, not `lo
 ## What works
 
 - Profile chooser, searchable movie shelf, keyboard/remote navigation, and browser video playback.
+- Password-free Photo Album profile with named collections, multi-photo uploads, previews, and original downloads.
 - Baby sees and streams only titles explicitly approved by a parent.
 - Parents can browse everything, scan the library, and change Baby approvals.
 - Argon2 password hashing, eight-hour sessions, logout, password reset, and login throttling.
@@ -326,6 +328,79 @@ Run the apply/verify commands again. Repeat this pattern for more locations, wit
 - Every configured folder must exist and be readable at startup. Duplicate or nested/overlapping roots are rejected to prevent double indexing. A scan that encounters an unreadable/missing folder fails without committing a partial library; restore the folder or remove its configuration and recreate the container. Check logs for startup errors. A previously listed unavailable movie cannot play until its file returns.
 - No location-management web form or automatic drive discovery is provided. Configuration changes require a server restart/container recreation; ordinary new movies only require a scan.
 
+## Photo Album
+
+Choose **Photo Album** on the profile screen. No password is required to view albums, create collections, or upload photos; anyone who can reach the server on your home network has this access. Movie approvals and Parents authentication remain separate.
+
+1. Enter a collection name (for example, “Summer at the lake”) and choose **Create album**.
+2. In the album, select one or more pictures with **Add photos**, then choose **Upload selected photos**. Keep the page open until it reports how many were saved. Failed files are listed individually; successful uploads remain saved.
+3. Select a photo to open its larger preview. Use **Previous** / **Next** to browse and **Download original** to retrieve the unchanged upload.
+4. Choose **All albums** to return to the collections, or **Switch profile** to return home.
+
+Supported uploads: JPEG, PNG, and WebP, up to **24 MiB per file**, at most **8192 pixels per side**, within the decoder's memory limit. iPhone HEIC/HEIF and Live Photo videos are not supported: export pictures as JPEG first, or use the iPhone Camera's **Most Compatible** format for future photos. Animated files produce a still preview. EXIF orientation is applied to previews; originals retain their original bytes and metadata. Do not upload files you do not want other users of this server to download.
+
+Originals, previews (up to 1600 pixels), and thumbnails (up to 400 pixels) are saved to disk; album names and photo records are stored in `DATA_DIR/library.sqlite3`. Uploads are processed one at a time per browser, and decoding shares a single work slot with movie cover generation to limit Pi memory use. Albums survive restarts and deployments. This first version does not include album/photo deletion, moving photos between albums, automatic imports from existing directories, deduplication, or a slideshow.
+
+### Photo storage locations
+
+| Run mode | Photo storage |
+| --- | --- |
+| Native Rust | `DATA_DIR/photo-albums`, or the exact directory set with `PHOTO_DIR` |
+| Local Docker Compose | `HOST_DATA_DIR/photo-albums` by default |
+| Pi deployment script | `/mnt/dvd-library/Custom-Plex-Photos/photo-albums` by default |
+| Docker with an explicit location | `photo-albums/` inside the existing folder named by `HOST_PHOTO_DIR` |
+
+The Pi deployment script requires `/mnt/dvd-library` to be mounted before it selects the default external folder. It checks writes as the container user before stopping the existing server. It saves `HOST_PHOTO_DIR` to the Pi's `.env` on successful deployment and respects an existing nonempty setting on subsequent runs. It never falls back to the SD card when this drive check fails. Movie mounts remain read-only; photo storage has its own writable mount.
+
+To use another location, create it on the Pi, make it writable by UID/GID `10001`, and set an absolute host path in the Pi's `/home/rob/custom-plex/.env`:
+
+```dotenv
+HOST_PHOTO_DIR=/mnt/another-drive/Family-Photos
+```
+
+Then deploy using `python3 scripts/deploy_pi.py` on the Mac. For manual Compose updates, set `HOST_PHOTO_DIR` explicitly to use the external drive; the external default is applied by the deployment script. Docker's bind mount requires the host folder to exist. Changing a path does not migrate existing uploads: stop the app, copy the entire `photo-albums` directory to the new location, retain the database, update the configuration, and restart. Keep the old copy until you verify the albums.
+
+### Prepare the Pi photo drive
+
+The existing Passport drive uses exFAT. It was mounted with `uid=1000,gid=1000,fmask=0022,dmask=0022`, which allows the `rob` account to write but prevents the application's UID/GID `10001` from uploading. exFAT permissions come from mount options; changing ownership with `chown` is not sufficient.
+
+On the Pi, inspect and back up the mount configuration:
+
+```sh
+findmnt -no SOURCE,TARGET,FSTYPE,OPTIONS /mnt/dvd-library
+sudo cp -p /etc/fstab /etc/fstab.before-photo-albums
+sudo nano /etc/fstab
+```
+
+In the **existing** entry for UUID `48BD-B0F0` at `/mnt/dvd-library`, keep its UUID, mount path, filesystem, and other options. Replace the ownership/mask options with `uid=1000,gid=10001,fmask=0002,dmask=0002`. This keeps `rob` as owner and lets the container's group write. Do not add a second entry. Check your edited file:
+
+```sh
+sudo findmnt --verify --verbose
+```
+
+After resolving any configuration errors, apply the change during a playback break. Stop other tasks using this disk and leave directories on the drive before unmounting:
+
+```sh
+cd /home/rob/custom-plex
+sudo docker compose stop app
+sudo umount /mnt/dvd-library && sudo mount /mnt/dvd-library
+findmnt -no TARGET,FSTYPE,OPTIONS /mnt/dvd-library
+```
+
+Do not force-unmount a busy drive. If unmounting fails, stop the process using it and retry. Confirm the drive is mounted with the new options before restarting the server:
+
+```sh
+mountpoint -q /mnt/dvd-library && sudo docker compose up -d --no-build --pull never --wait
+```
+
+Then run the deployment script from the Mac. It creates the photo folder and checks that the container can write to it. On an ext4 drive instead, create the chosen photo folder and grant UID/GID `10001` access with ordinary directory ownership/permissions.
+
+### Back up albums
+
+Back up **both** the SQLite data directory and the photo storage. The deployment script backs up the database, but does not copy the external photo collection on every update. Stop the service for a consistent paired backup, copy the data directory and the entire external `photo-albums` folder to another device, then restart. Restoring only the database cannot recover missing photo files. Restoring only files cannot recover album membership. Originals may contain location metadata; keep backups private.
+
+Implementation is contained in `src/photos.rs` (schema, storage, validation, and routes), with `web/photos.js` for the interface. `main.rs` only reads the optional photo storage setting.
+
 ## Configuration
 
 | Setting | Default | Purpose |
@@ -535,7 +610,7 @@ python3 scripts/deploy_pi.py --host rob@192.168.0.73 \
   --key ~/.ssh/custom_plex_pi --directory /home/rob/custom-plex
 ```
 
-The Pi needs ARM64 Linux, Python 3, Docker Compose, and passwordless `sudo` for Docker and backups. This script updates an existing installation with a configured `.env` and database; use the first-time setup instructions for a new Pi. Run one deployment at a time.
+The Pi needs ARM64 Linux, Python 3, Docker Compose, and passwordless `sudo` for Docker and backups. Before the first Photo Album deployment, follow [Prepare the Pi photo drive](#prepare-the-pi-photo-drive) so the external disk is writable by the container. This script updates an existing installation with a configured `.env` and database; use the first-time setup instructions for a new Pi. Run one deployment at a time.
 
 The script builds the current local source for ARM64, transfers the image and source over SSH, and briefly stops the server for a consistent database backup. It preserves the Pi's `.env`, Compose override files, movies, and configured host data directory. It never calls `set-password`. Images can take several minutes to transfer and load on a Pi 3.
 

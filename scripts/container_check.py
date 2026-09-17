@@ -54,7 +54,18 @@ request(cover, 204, png, headers={'Content-Type': 'image/png'})
 uploaded = request(cover)
 assert uploaded.startswith(b'\xff\xd8') and uploaded != generated
 
+# Photo Album creation and upload require no parent session.
+album = json.loads(request('/api/albums', 201, {'name': 'Family photos'}))
+photo = json.loads(request(f"/api/albums/{album['id']}/photos?name=sample.png", 201, png, headers={'Content-Type': 'image/png'}))
+original_url = f"/api/photos/{photo['id']}/original"
+assert request(original_url) == png
+assert request(f"/api/photos/{photo['id']}/thumbnail").startswith(b'\xff\xd8')
+
 subprocess.run(['docker', 'compose', 'up', '-d', '--no-build', '--pull', 'never', '--force-recreate', '--wait'], check=True)
+assert request(original_url) == png, 'Photo original did not persist'
+albums = json.loads(request('/api/albums'))
+assert any(a['id'] == album['id'] and a['count'] == 1 for a in albums), 'Album did not persist'
+
 persisted = json.loads(request('/api/movies'))
 assert len(persisted) == 1, f'Approval did not persist: {persisted}'
 assert json.loads(request('/api/session', authenticated=True))['parent'], 'Session did not persist'
@@ -71,4 +82,4 @@ request(media, 404)
 request(cover, 404)
 request('/api/logout', 204, {}, True)
 request('/api/scan', 401, {}, True)
-print('Container checks passed: login, approval, streaming, seeking, cover generation/upload/reset, recreation, password persistence, revocation, logout.')
+print('Container checks passed: login, approval, streaming, seeking, cover generation/upload/reset, photo albums, recreation, password persistence, revocation, logout.')

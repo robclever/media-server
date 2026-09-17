@@ -3,3 +3,5 @@
 .source{margin:.5rem 1rem 1rem;font-size:.8rem;overflow-wrap:anywhere}
 
 .cover img{display:block;width:100%;height:190px;object-fit:contain;background:#101919}.image-actions{display:flex;flex-direction:column;gap:.5rem;margin:0 1rem 1rem}.image-actions button{font-size:.8rem;padding:.6rem}button:disabled{opacity:.55;cursor:wait}
+
+.profiles{flex-wrap:wrap}.photo-avatar{background:#cfb99d;color:#493f32}.album-card{display:block;width:100%;padding:0;overflow:hidden;text-align:left}.album-card h2,.album-card p{margin:1rem}.album-card img{width:100%;height:190px;object-fit:cover;display:block}.album-placeholder{height:190px;display:grid;place-items:center;font-size:3rem;color:#e8d7a1;background:#34483b}.photo-tile{padding:0;overflow:hidden;background:#192c25}.photo-tile img{display:block;width:100%;height:200px;object-fit:contain}.photo-tile span{display:block;padding:.75rem;overflow-wrap:anywhere}#full-photo{display:block;max-width:100%;height:65vh;object-fit:contain;margin:auto}.photo-navigation{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:1rem 0}.photo-navigation a{color:#eac77c}#upload-progress{white-space:pre-line}

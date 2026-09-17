@@ -24,6 +24,8 @@ class DeploymentTests(unittest.TestCase):
 
             def run(*command, **kwargs):
                 calls.append(command)
+                if '--environment' in command:
+                    return subprocess.CompletedProcess(command, 0, 'HOST_PHOTO_DIR=' + str(data))
                 if 'config' in command:
                     return subprocess.CompletedProcess(command, 0, json.dumps(config))
                 if 'inspect' in command:
@@ -50,6 +52,22 @@ class DeploymentTests(unittest.TestCase):
             self.assertFalse(any('set-password' in c for c in calls))
             self.assertLess(next(i for i,c in enumerate(calls) if 'stop' in c), calls.index(backup))
         return calls
+
+    def test_default_photo_storage_requires_mounted_disk(self):
+        calls = []
+        def fake(*command, **kwargs):
+            calls.append(command)
+            if 'mountpoint' in command:
+                raise subprocess.CalledProcessError(1, command)
+            return subprocess.CompletedProcess(command, 0, '')
+        with patch.object(deploy_pi_remote, 'run', side_effect=fake):
+            with self.assertRaises(subprocess.CalledProcessError):
+                deploy_pi_remote.photo_storage(['docker', 'compose'])
+        self.assertFalse(any('mkdir' in command for command in calls))
+
+    def test_default_photo_storage_uses_external_disk(self):
+        with patch.object(deploy_pi_remote, 'run', return_value=subprocess.CompletedProcess([],0,'')):
+            self.assertEqual(deploy_pi_remote.photo_storage(['docker','compose']), ('/mnt/dvd-library/Custom-Plex-Photos', True))
 
     def test_preserves_external_database_mount(self):
         calls = self.exercise()
