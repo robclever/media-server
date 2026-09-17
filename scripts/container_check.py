@@ -58,6 +58,11 @@ subprocess.run(['docker', 'compose', 'up', '-d', '--no-build', '--pull', 'never'
 persisted = json.loads(request('/api/movies'))
 assert len(persisted) == 1, f'Approval did not persist: {persisted}'
 assert json.loads(request('/api/session', authenticated=True))['parent'], 'Session did not persist'
+# A persisted session alone cannot prove the password hash survived deployment.
+request('/api/logout', 204, {}, True)
+jar.clear()
+request('/api/login', 204, {'password': password}, True)
+assert json.loads(request('/api/session', authenticated=True))['parent'], 'Password did not persist'
 assert request(cover) == uploaded, 'Uploaded cover did not persist'
 request(cover, 204, method='DELETE')
 assert request(cover) == generated, 'Automatic cover did not return after reset'
@@ -66,4 +71,4 @@ request(media, 404)
 request(cover, 404)
 request('/api/logout', 204, {}, True)
 request('/api/scan', 401, {}, True)
-print('Container checks passed: login, approval, streaming, seeking, cover generation/upload/reset, recreation, revocation, logout.')
+print('Container checks passed: login, approval, streaming, seeking, cover generation/upload/reset, recreation, password persistence, revocation, logout.')

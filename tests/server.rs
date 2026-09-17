@@ -131,6 +131,9 @@ async fn authorization_streaming_and_persistence() {
     let reopened =
         router(App::open(tmp.path().join("media"), tmp.path().join("data"), false).unwrap());
     assert_eq!(list(&reopened, "").await.len(), 1);
+    // A fresh login verifies the stored password survives reopening the database.
+    let reopened_cookie = login(&reopened).await;
+    assert_eq!(list(&reopened, &reopened_cookie).await.len(), 2);
     assert_eq!(
         request(&app, "POST", "/api/logout", &cookie, "{}")
             .await
