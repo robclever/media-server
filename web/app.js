@@ -14,7 +14,7 @@ async function api(path, data) {
   return response.status === 204 ? null : response.json();
 }
 function report(error) { $('status').textContent = error.message; }
-function show(id) { for (const section of ['profiles','login','library']) $(section).hidden = section !== id; $('status').textContent = ''; }
+function show(id) { for (const section of ['profiles','login','library','albums','album-detail']) $(section).hidden = section !== id; $('status').textContent = ''; }
 async function load() {
   collection = await api('/api/movies');
   $('profile-label').textContent = parent ? 'PARENTS · THE FULL COLLECTION' : 'BABY · LITTLE FAVORITES';
@@ -97,7 +97,7 @@ $('video').onerror = () => { $('playback-error').hidden = false; };
 // Arrow keys move between controls for TV remotes; native video and inputs retain their keys.
 document.addEventListener('keydown', event => {
   if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key) || ['INPUT','VIDEO'].includes(document.activeElement.tagName)) return;
-  const scope = $('player').open ? $('player') : document;
+  const scope = $('player').open ? $('player') : $('photo-viewer').open ? $('photo-viewer') : document;
   const controls = [...scope.querySelectorAll('button,a,input,video')].filter(el => el.getClientRects().length && !el.disabled);
   const index = controls.indexOf(document.activeElement);
   const step = ['ArrowLeft','ArrowUp'].includes(event.key) ? -1 : 1;

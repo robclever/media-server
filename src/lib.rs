@@ -1,4 +1,5 @@
 mod covers;
+mod photos;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use axum::{
     Json, Router,
@@ -26,6 +27,7 @@ pub struct App {
     db: Arc<Mutex<Connection>>,
     media: BTreeMap<String, PathBuf>,
     secure: bool,
+    photos: PathBuf,
     attempts: Arc<Mutex<Vec<i64>>>,
     cover_work: Arc<tokio::sync::Semaphore>,
 }
@@ -93,6 +95,7 @@ impl App {
             tx.commit()?;
         }
         db.execute_batch("CREATE TABLE IF NOT EXISTS covers (movie_id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, jpeg BLOB NOT NULL);")?;
+        let photos = photos::initialize(&db, &data)?;
         // Removed sources must never remain visible between startup and the first scan.
         let tx = db.transaction()?;
         let known = media.keys().cloned().collect::<Vec<_>>();
@@ -111,6 +114,7 @@ impl App {
             db: Arc::new(Mutex::new(db)),
             media,
             secure,
+            photos,
             attempts: Arc::new(Mutex::new(Vec::new())),
             cover_work: Arc::new(tokio::sync::Semaphore::new(1)),
         })
@@ -235,6 +239,7 @@ pub fn router(app: App) -> Router {
                 )
             }),
         )
+        .merge(photos::routes())
         .route("/health", get(|| async { "ok" }))
         .route("/api/session", get(session))
         .route("/api/login", post(login))
