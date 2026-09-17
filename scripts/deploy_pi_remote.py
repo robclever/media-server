@@ -18,8 +18,11 @@ def main():
     config = json.loads(run(*compose, 'config', '--format', 'json', capture_output=True, text=True).stdout)
     service = config['services']['app']
     data = next(v['source'] for v in service['volumes'] if v['target'] == '/data' and v['type'] == 'bind')
-    if not Path(data, 'library.sqlite3').is_file():
-        raise RuntimeError('Existing database not found; this script only updates existing installations.')
+    # The container owns this private directory; the SSH user cannot stat it.
+    try:
+        run('sudo', '-n', 'test', '-f', str(Path(data) / 'library.sqlite3'))
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError('Cannot verify the existing database. Check HOST_DATA_DIR and passwordless sudo; this script only updates existing installations.') from error
     image = service['image']
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     backup = Path(directory).parent / 'custom-plex-backups' / stamp

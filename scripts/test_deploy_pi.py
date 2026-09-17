@@ -36,7 +36,7 @@ class DeploymentTests(unittest.TestCase):
 
             cwd = os.getcwd()
             try:
-                with patch.object(deploy_pi_remote, 'run', side_effect=run), patch('sys.argv', ['remote', str(directory), '/tmp/staging', 'custom-plex:release']):
+                with patch.object(deploy_pi_remote, 'run', side_effect=run), patch('sys.argv', ['remote', str(directory), '/tmp/staging', 'custom-plex:release']), patch.object(Path, 'is_file', side_effect=PermissionError('Private database directory')):
                     if fail_start:
                         with self.assertRaises(subprocess.CalledProcessError):
                             deploy_pi_remote.main()
@@ -44,6 +44,7 @@ class DeploymentTests(unittest.TestCase):
                         deploy_pi_remote.main()
             finally:
                 os.chdir(cwd)
+            self.assertIn(('sudo', '-n', 'test', '-f', str(data / 'library.sqlite3')), calls)
             backup = next(c for c in calls if 'tar' in c)
             self.assertIn(str(data), backup)
             self.assertFalse(any('set-password' in c for c in calls))

@@ -14,7 +14,7 @@ This is a standalone Plex-like application. It does not use official Plex client
 
 Run commands on the machine named above each example. Replace `PI_USER` and `PI_ADDRESS` with your Pi's login name and IP address; these are placeholders, not literal credentials. `localhost` always means the device on which the browser or command is running.
 
-### Tomorrow's local test
+### Local Test - Connection from Mac to Raspi
 
 Start Docker Desktop. In a terminal on this Mac:
 
@@ -649,6 +649,7 @@ To restore the default data path, stop the service, move the current `data` dire
 | A removed file still appears | Scan again. Scans run automatically only at startup. |
 | File will not play | Test an H.264/AAC MP4; prepare incompatible files with FFmpeg. |
 | Playback buffers | Check network, storage speed, bitrate, and Pi load. |
+| Deploy script reports `PermissionError` for `data/library.sqlite3` | Use the updated deployment scripts and rerun `python3 scripts/deploy_pi.py`. The database check uses `sudo` because the container owns its private directory; keep its permissions intact. |
 | SQLite permission error | Ensure UID 10001 owns the host data directory and can write it. |
 | Image cannot be pulled | Check image name/tag, package visibility, and registry login; use a local build until a release is published. |
 | Local image unexpectedly pulls | Use `--pull never` after building or explicitly pulling the desired image. |
