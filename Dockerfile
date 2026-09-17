@@ -6,7 +6,7 @@ COPY web ./web
 RUN cargo build --locked --release
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/* && groupadd -g 10001 cinema && useradd -u 10001 -g cinema cinema
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg && rm -rf /var/lib/apt/lists/* && groupadd -g 10001 cinema && useradd -u 10001 -g cinema cinema
 COPY --from=builder /build/target/release/custom-plex /usr/local/bin/custom-plex
 ENV APP_BIND=0.0.0.0:8080 MEDIA_DIR=/media DATA_DIR=/data
 USER 10001:10001

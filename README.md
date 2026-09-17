@@ -8,12 +8,13 @@ This is a standalone Plex-like application. It does not use official Plex client
 
 - **Try it on this Mac:** follow [Tomorrow's local test](#tomorrows-local-test).
 - **Put it on the Pi now, without GitHub:** follow [Deploy from source](#deploy-from-source-no-published-image-needed), after preparing Docker on the Pi.
+- **Update the existing Pi from this Mac:** run `python3 scripts/deploy_pi.py`; see [Deploy updates from your Mac](#deploy-updates-from-your-mac).
 - **Add your movies:** follow [Add movies step by step](#add-movies-step-by-step).
 - **Deploy a future published release:** use the numbered [Raspberry Pi deployment instructions](#deploy-on-a-raspberry-pi).
 
 Run commands on the machine named above each example. Replace `PI_USER` and `PI_ADDRESS` with your Pi's login name and IP address; these are placeholders, not literal credentials. `localhost` always means the device on which the browser or command is running.
 
-### Tomorrow's local test
+### Local Test - Connection from Mac to Raspi
 
 Start Docker Desktop. In a terminal on this Mac:
 
@@ -47,7 +48,7 @@ For a TV on the same home network, use `http://<this-macs-lan-ip>:8080`, not `lo
 - Docker Compose with persistent data, read-only media, health checks, and automatic restarts.
 - GitHub Actions configuration for Rust checks, native AMD64/ARM64 container tests, and versioned image publishing.
 
-No DVD ripping, live transcoding, downloaded posters, external subtitles, native TV app, or internet-facing deployment is included. Titles come from filenames; movie cards use built-in artwork.
+No DVD ripping, live transcoding, online poster lookup, external subtitles, native TV app, or internet-facing deployment is included. Titles come from filenames; covers use uploaded images, matching local artwork, or automatically extracted movie frames.
 
 ## Quick start: local Rust development
 
@@ -204,6 +205,41 @@ Click **Add to Baby** for an approved movie, then switch to Baby to check that i
 - **Replace at the same path:** the existing approval remains. Revoke Baby approval before replacing content if it should be reviewed again.
 - **Remove:** move the file outside the media folder or delete it, then scan. Its card disappears. Stored database entries are retained, so reintroducing the exact same path restores its previous approval.
 - **Missing after a scan:** check that the copy completed, its final extension is supported, it is inside the configured folder, it is not a symlink, and the container can read it. Then check whether you are viewing Baby or Parents.
+
+## Movie cover images
+
+Every movie card has **Add / change image** and **Use automatic image** buttons. Both Baby and Parents may change the image of a movie they can see. Baby cannot view or change images for parents-only movies. Cover changes are shared across devices and do not change a movie's Baby approval.
+
+### Upload an image
+
+1. Open the catalog and find the movie.
+2. Click **Add / change image** and choose a JPEG, PNG, or WebP from your computer or phone.
+3. Wait for the image-saved message. The new image replaces the catalog placeholder or automatic cover.
+
+The maximum upload is 8 MiB, with at most 8192 pixels on either side and a bounded decoding memory budget. Large images that exceed the decoding budget are also rejected. SVG, GIF, and HEIC are not supported; export a JPEG or PNG first. Images are decoded, resized to fit within 640 × 640 pixels, and stored as JPEGs, rather than served as arbitrary uploaded files. The original media directory remains read-only.
+
+### Automatic image selection
+
+When no uploaded image exists, the server checks, in order:
+
+1. An image with the **same filename stem beside the video**, checking `.jpg`, `.jpeg`, `.png`, then `.webp` (lowercase extensions). For example, `Finding Nemo (2003).mp4` can use `Finding Nemo (2003).jpg` in the same directory. This works in each configured storage location; matching names on different drives remain independent.
+2. A video frame at approximately 10 seconds, or the beginning if the video is too short.
+3. The existing play-symbol placeholder if neither artwork nor a decodable frame is available.
+
+Images are generated on demand as cards enter view, so the first load may take a little time. Work is serialized to limit load on the Pi, with a 20-second timeout per extraction attempt. Results are cached in SQLite. If the video or matching image changes its size or modification timestamp, its automatic cover is refreshed on the next request. Unusable-image/frame results can be retried with **Use automatic image**.
+
+**Use automatic image** deletes the saved cover/cache for that movie and repeats the order above. It does not remove a matching image from the media folder; remove or rename that image yourself if you specifically want a movie frame instead. It never deletes the video. To see another device's image change, refresh the catalog.
+
+FFmpeg is included in the Docker image. For native Rust development, install FFmpeg separately and ensure `ffmpeg` is on the server process's `PATH`; uploads and matching images still work without it, but frame extraction cannot. This feature does not perform playback transcoding or download posters from external services.
+
+Uploaded and generated images live in the `covers` table in `DATA_DIR/library.sqlite3`, so existing data backups include them. Cover records use the movie ID and survive rescans and container recreation. Deleted/removed library entries retain their cached cover if later restored, just as they retain approvals. The schema change is additive.
+
+For an existing Docker deployment, rebuild/pull an image with this feature and recreate the container. Local build:
+
+```sh
+docker compose build
+docker compose up -d --no-build --pull never --wait
+```
 
 ## Configure additional storage locations
 
@@ -378,7 +414,7 @@ COOKIE_SECURE=false
 
 Replace the owner/repository/version placeholders with a real published image. No image has been published by this local implementation. The media directory must exist, and UID 10001 must be able to traverse its folders and read its files. Do not change ownership of your entire media drive without considering its other uses.
 
-### 3. Start and set the parents password
+### 3. First startup: set the parents password
 
 For a private GHCR package, first run `docker login ghcr.io` using an account/token allowed to read the package. Then:
 
@@ -452,7 +488,7 @@ docker compose down
 unset COMPOSE_PROJECT_NAME HOST_MEDIA_DIR HOST_DATA_DIR PORT PLEX_IMAGE
 ```
 
-Use new empty test directories for another run. The full check verifies login, approval, streaming, seeking, persistence after container recreation, revocation, and logout. Temporary test credentials remain only in the disposable test database.
+Use new empty test directories for another run. The full check verifies login, approval, streaming, seeking, persistence after container recreation (including a fresh login with the original password), revocation, and logout. Temporary test credentials remain only in the disposable test database.
 
 ### Test multiple Docker locations
 
@@ -482,6 +518,100 @@ Set the Rust and both container jobs as required checks in your branch protectio
 CI builds and tests Linux containers. It cannot establish real TV codec support, remote-control behavior, physical disk reliability, or Pi performance. Publishing an image does not deploy it automatically to the Pi.
 
 ## Backups, updates, and rollback
+
+### Deploy updates from your Mac
+
+With Docker Desktop running, Python 3 installed, and SSH access to the existing Pi, run:
+
+```sh
+cd /Users/robclever/Documents/programming/custom_plex
+python3 scripts/deploy_pi.py
+```
+
+Defaults target `rob@192.168.0.73`, SSH key `~/.ssh/custom_plex_pi`, and the existing installation at `/home/rob/custom-plex`. Override them if needed:
+
+```sh
+python3 scripts/deploy_pi.py --host rob@192.168.0.73 \
+  --key ~/.ssh/custom_plex_pi --directory /home/rob/custom-plex
+```
+
+The Pi needs ARM64 Linux, Python 3, Docker Compose, and passwordless `sudo` for Docker and backups. This script updates an existing installation with a configured `.env` and database; use the first-time setup instructions for a new Pi. Run one deployment at a time.
+
+The script builds the current local source for ARM64, transfers the image and source over SSH, and briefly stops the server for a consistent database backup. It preserves the Pi's `.env`, Compose override files, movies, and configured host data directory. It never calls `set-password`. Images can take several minutes to transfer and load on a Pi 3.
+
+Each run stores a private backup in `/home/rob/custom-plex-backups/<timestamp>` (beside your deployment folder if using another path) and retains the previous Docker image. It waits for Docker's health check before reporting success. If startup fails, it attempts to restart the previous image and Compose configuration, then exits with an error. It does not automatically restore the database: a future incompatible database migration may require restoring the printed backup using the rollback instructions below. Keep backups and old images until you have checked login, catalog images, and playback; remove older ones manually when no longer needed.
+
+#### Verify the update
+
+After the script reports success:
+
+1. Open [the Pi server](http://192.168.0.73:8080) on your home network and refresh the page.
+2. Choose **Parents** and sign in with your existing password.
+3. Confirm your movies and Baby approvals are present. Play a movie and try seeking.
+4. On a movie card, use **Add / change image** to upload artwork, or **Use automatic image** to return to local artwork or an extracted frame. Baby can change images for approved movies too.
+5. Switch to **Baby** and confirm only approved movies appear.
+
+For server diagnostics, run from the Mac:
+
+```sh
+ssh -i ~/.ssh/custom_plex_pi rob@192.168.0.73
+```
+
+Then run on the Pi:
+
+```sh
+cd /home/rob/custom-plex
+sudo docker compose ps
+sudo docker compose logs --tail=100 app
+curl --fail http://localhost:8080/health
+```
+
+Expect a healthy container and `ok` from the health endpoint. If SSH fails, check that the Pi is powered on, connected to your home network, and still has the configured IP. Use `python3 scripts/deploy_pi.py --help` to see connection options. If the script fails, read its error and any printed backup location before retrying; it exits unsuccessfully even if recovery restarted the previous version.
+
+#### Restore a deployment-script backup
+
+The script's `data.tar.gz` contains the **contents** of the data directory, whereas the manual backup below contains a top-level `data` folder. Extract a script backup into an empty data directory, not its parent. On the Pi, substitute the timestamp printed by the script:
+
+```sh
+cd /home/rob/custom-plex
+BACKUP_DIR=/home/rob/custom-plex-backups/REPLACE_WITH_TIMESTAMP
+# Confirm the backup exists before stopping the server.
+sudo test -f "$BACKUP_DIR/data.tar.gz" && sudo docker compose stop app
+```
+
+For the existing Pi's `/home/rob/custom-plex/data` location, preserve the current database before restoring:
+
+```sh
+sudo mv data "data-before-restore-$(date -u +%Y%m%dT%H%M%SZ)"
+sudo mkdir data
+sudo tar -xzf "$BACKUP_DIR/data.tar.gz" -C data
+sudo chown -R 10001:10001 data
+sudo chmod 700 data
+sudo docker compose up -d --no-build --pull never --wait
+```
+
+If `HOST_DATA_DIR` points elsewhere, use that actual directory in these commands. For a version rollback, select the matching previous image printed by the script in `.env` as `PLEX_IMAGE` before startup. Restoring the database restores its password, approvals, and images to the backup date. Reset the password afterward if you need to revoke restored sessions.
+
+### Keep the password through deployments
+
+The Parents password hash is stored in `DATA_DIR/library.sqlite3`, alongside approvals, sessions, and cover images. Docker maps `HOST_DATA_DIR` on the host to `/data` in the container. Rebuilding, updating, or recreating the container retains the password when it uses the same host data directory. Startup never resets the password.
+
+- Run `custom-plex set-password` only for initial setup or an intentional password reset. Do not include it in an update script; it replaces the password and signs out existing sessions.
+- Keep your existing `.env` and data directory when copying a new release. Do not replace them with the example configuration or an empty directory.
+- For deployments from different checkout folders, set an **absolute** `HOST_DATA_DIR` in `.env`, such as `/home/rob/custom-plex/data` for the existing Pi deployment, or `/srv/custom-plex/data` for the published-image layout. Point it at your existing database directory; changing the setting does not move data automatically. Native runs should likewise keep the same `DATA_DIR`.
+- After an update, sign in with the same password. Sessions expire after eight hours; needing to sign in again does not mean the password was lost.
+
+For an existing source deployment, update the source files while preserving `.env`, `data`, and `media`, then run from that deployment directory:
+
+```sh
+docker compose build
+docker compose up -d --no-build --pull never --wait
+curl --fail http://localhost:8080/health
+```
+
+Do not repeat the first-time password setup during this update.
+
+### Back up and update safely
 
 Stop the service before copying the database. The commands below use the published-image layout at `/srv/custom-plex`. For the source deployment in `$HOME/custom-plex`, run Compose there and substitute that path for `/srv/custom-plex` in the backup/restore commands. From `/srv/custom-plex`, using its default data path:
 
@@ -519,12 +649,15 @@ To restore the default data path, stop the service, move the current `data` dire
 | A removed file still appears | Scan again. Scans run automatically only at startup. |
 | File will not play | Test an H.264/AAC MP4; prepare incompatible files with FFmpeg. |
 | Playback buffers | Check network, storage speed, bitrate, and Pi load. |
+| Deploy script reports `PermissionError` for `data/library.sqlite3` | Use the updated deployment scripts and rerun `python3 scripts/deploy_pi.py`. The database check uses `sudo` because the container owns its private directory; keep its permissions intact. |
 | SQLite permission error | Ensure UID 10001 owns the host data directory and can write it. |
 | Image cannot be pulled | Check image name/tag, package visibility, and registry login; use a local build until a release is published. |
 | Local image unexpectedly pulls | Use `--pull never` after building or explicitly pulling the desired image. |
 | `.local` address fails | Use the Pi IP address. |
 
 ## Validation status
+
+Cover-image update (September 17, 2026): all eight Rust integration tests and Clippy passed. ARM64 Docker checks verified FFmpeg frame extraction, anonymous image upload for approved movies, persistence across recreation, reset to automatic imagery, and access denial after approval revocation. Browser checks verified Baby's file picker, successful upload and immediate image display, plus automatic cover reset. GitHub Actions runs the extended container checks on its next run; the thumbnail feature was deployed to the physical Pi on September 17, 2026. Docker health and LAN health checks passed, the deployed frontend includes thumbnail controls, and the password account and movie approvals matched the pre-deployment backup. Playback and thumbnail interaction on the physical Pi still need user verification.
 
 The multiple-location update passed all six Rust integration tests, formatting, Clippy, and the isolated ARM64 Docker test for distinct streams, approvals, recreation, and source removal. The running local server was updated after a database backup under `backups/before-multisource-20260916T183703Z/data`. That backup is excluded from Git and Docker build context; retain it for rollback to the original schema. No additional personal storage paths are enabled until you configure them.
 
@@ -536,6 +669,8 @@ Verified locally on September 16, 2026:
 - HTTP smoke checks and full container checks passed, including persistence after container recreation.
 - Browser checks passed for parent login, approval controls, anonymous Baby access, and requiring credentials again after switching profiles. An eight-second generated H.264/AAC MP4 played successfully.
 
-The main local container is available on port 8080 with a generated `Playback-Test.mp4` in the ignored media directory. Its parent account is intentionally unconfigured: run `docker compose exec app custom-plex set-password`, sign in, scan the library, and approve the sample to try Baby playback. The application has no built-in test password; automated tests use a separate disposable database.
+The local test setup uses port 8080 and a generated `Playback-Test.mp4` in the ignored media directory. If you have not configured that instance’s Parents account, run `docker compose exec app custom-plex set-password`, then sign in, scan the library, and approve the sample to try Baby playback. Keep an existing password when updating. The application has no built-in test password; automated tests use a separate disposable database.
 
-Not yet verified: an actual Raspberry Pi/TV, AMD64 runtime locally, GitHub-hosted workflow execution/image publication, and a production backup restore. The GitHub workflow files are ready, but this workspace has no GitHub remote. No hosted test run or published image is claimed.
+Deployment-script validation: command-line help and Python compilation passed, along with two mocked tests covering an external data directory and recovery after startup failure. These tests are included in GitHub Actions. The reusable script itself has not yet been run end to end against the Pi; the completed deployment used the preceding deployment command.
+
+Not yet verified: actual movie playback on the Raspberry Pi/TV, AMD64 runtime locally, GitHub-hosted workflow execution/image publication, and a production backup restore. The GitHub workflow files are ready, but this workspace has no GitHub remote. No hosted test run or published image is claimed.

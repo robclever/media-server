@@ -1,3 +1,4 @@
+mod covers;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use axum::{
     Json, Router,
@@ -26,6 +27,7 @@ pub struct App {
     media: BTreeMap<String, PathBuf>,
     secure: bool,
     attempts: Arc<Mutex<Vec<i64>>>,
+    cover_work: Arc<tokio::sync::Semaphore>,
 }
 fn now() -> i64 {
     SystemTime::now()
@@ -90,6 +92,7 @@ impl App {
                 DROP TABLE movies_legacy;")?;
             tx.commit()?;
         }
+        db.execute_batch("CREATE TABLE IF NOT EXISTS covers (movie_id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, jpeg BLOB NOT NULL);")?;
         // Removed sources must never remain visible between startup and the first scan.
         let tx = db.transaction()?;
         let known = media.keys().cloned().collect::<Vec<_>>();
@@ -109,6 +112,7 @@ impl App {
             media,
             secure,
             attempts: Arc::new(Mutex::new(Vec::new())),
+            cover_work: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
     pub fn set_password(&self, password: &str) -> anyhow::Result<()> {
@@ -239,6 +243,13 @@ pub fn router(app: App) -> Router {
         .route("/api/scan", post(scan))
         .route("/api/movies/{id}/approval", post(approve))
         .route("/media/{id}", get(stream))
+        .route(
+            "/api/movies/{id}/cover",
+            get(covers::get)
+                .post(covers::upload)
+                .delete(covers::reset)
+                .layer(axum::extract::DefaultBodyLimit::max(covers::MAX_UPLOAD)),
+        )
         .layer(middleware::from_fn(protections))
         .with_state(app)
 }

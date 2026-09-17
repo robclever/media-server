@@ -131,6 +131,9 @@ async fn authorization_streaming_and_persistence() {
     let reopened =
         router(App::open(tmp.path().join("media"), tmp.path().join("data"), false).unwrap());
     assert_eq!(list(&reopened, "").await.len(), 1);
+    // A fresh login verifies the stored password survives reopening the database.
+    let reopened_cookie = login(&reopened).await;
+    assert_eq!(list(&reopened, &reopened_cookie).await.len(), 2);
     assert_eq!(
         request(&app, "POST", "/api/logout", &cookie, "{}")
             .await
@@ -365,5 +368,156 @@ fn invalid_source_configuration_is_rejected() {
         ]),
     ] {
         assert!(App::open_sources(sources, tmp.path().join("data"), false).is_err());
+    }
+}
+
+fn cover_image() -> Vec<u8> {
+    let image = image::RgbImage::from_pixel(16, 16, image::Rgb([220, 120, 40]));
+    let mut bytes = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new(&mut bytes)
+        .encode_image(&image)
+        .unwrap();
+    bytes
+}
+async fn upload_cover(
+    app: &Router,
+    id: i64,
+    cookie: &str,
+    bytes: Vec<u8>,
+) -> axum::response::Response {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/movies/{id}/cover"))
+                .header("cookie", cookie)
+                .header("x-requested-with", "custom-plex")
+                .header("content-type", "image/jpeg")
+                .body(Body::from(bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+#[tokio::test]
+async fn visible_movie_covers_can_be_changed_without_parent_login() {
+    let (tmp, state) = setup();
+    let app = router(state);
+    let cookie = login(&app).await;
+    let id = list(&app, &cookie).await[0].id;
+    let cover = format!("/api/movies/{id}/cover");
+    assert_eq!(
+        upload_cover(&app, id, "", cover_image()).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        upload_cover(&app, id, &cookie, cover_image())
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        request(&app, "GET", &cover, "", "").await.status(),
+        StatusCode::NOT_FOUND
+    );
+    request(
+        &app,
+        "POST",
+        &format!("/api/movies/{id}/approval"),
+        &cookie,
+        r#"{"approved":true}"#,
+    )
+    .await;
+    assert_eq!(
+        upload_cover(&app, id, "", cover_image()).await.status(),
+        StatusCode::NO_CONTENT
+    );
+    let response = request(&app, "GET", &cover, "", "").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "image/jpeg");
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    assert!(image::load_from_memory(&body).is_ok());
+    assert_eq!(
+        upload_cover(&app, id, "", b"not an image".to_vec())
+            .await
+            .status(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE
+    );
+    assert_eq!(
+        upload_cover(&app, id, "", vec![0; 8 * 1024 * 1024 + 1])
+            .await
+            .status(),
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+    assert_eq!(
+        request(&app, "GET", &cover, "", "").await.status(),
+        StatusCode::OK
+    );
+    let reopened =
+        router(App::open(tmp.path().join("media"), tmp.path().join("data"), false).unwrap());
+    assert_eq!(
+        request(&reopened, "GET", &cover, "", "").await.status(),
+        StatusCode::OK
+    );
+    request(
+        &app,
+        "POST",
+        &format!("/api/movies/{id}/approval"),
+        &cookie,
+        r#"{"approved":false}"#,
+    )
+    .await;
+    assert_eq!(
+        request(&app, "GET", &cover, "", "").await.status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        request(&app, "DELETE", &cover, "", "").await.status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        request(&app, "DELETE", &cover, &cookie, "").await.status(),
+        StatusCode::NO_CONTENT
+    );
+}
+#[tokio::test]
+async fn sidecar_covers_work_and_cannot_escape_the_media_root() {
+    let (tmp, state) = setup();
+    let app = router(state);
+    let cookie = login(&app).await;
+    let id = list(&app, &cookie)
+        .await
+        .into_iter()
+        .find(|m| m.title == "Family")
+        .unwrap()
+        .id;
+    let cover = format!("/api/movies/{id}/cover");
+    std::fs::write(tmp.path().join("media/Family.jpg"), cover_image()).unwrap();
+    assert_eq!(
+        request(&app, "GET", &cover, &cookie, "").await.status(),
+        StatusCode::OK
+    );
+    // An uploaded image wins even after the sidecar changes or becomes invalid.
+    upload_cover(&app, id, &cookie, cover_image()).await;
+    std::fs::write(tmp.path().join("media/Family.jpg"), b"broken sidecar").unwrap();
+    assert_eq!(
+        request(&app, "GET", &cover, &cookie, "").await.status(),
+        StatusCode::OK
+    );
+    request(&app, "DELETE", &cover, &cookie, "").await;
+    #[cfg(unix)]
+    {
+        std::fs::remove_file(tmp.path().join("media/Family.jpg")).unwrap();
+        std::fs::write(tmp.path().join("private.jpg"), cover_image()).unwrap();
+        std::os::unix::fs::symlink(
+            tmp.path().join("private.jpg"),
+            tmp.path().join("media/Family.jpg"),
+        )
+        .unwrap();
+        // The movie fixture is deliberately not a decodable video: no fallback exists.
+        assert_eq!(
+            request(&app, "GET", &cover, &cookie, "").await.status(),
+            StatusCode::NOT_FOUND
+        );
     }
 }
