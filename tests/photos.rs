@@ -44,6 +44,20 @@ fn setup() -> (tempfile::TempDir, Router) {
         .unwrap();
     (tmp, router(app))
 }
+
+#[tokio::test]
+async fn home_storage_reports_media_capacity_without_double_counting_mounts() {
+    let (_tmp, app) = setup();
+    let response = send(&app, "GET", "/api/storage", vec![], false).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let storage = json(response).await;
+    let total = storage["total"].as_u64().unwrap();
+    let available = storage["available"].as_u64().unwrap();
+    assert!(total > 0 && available <= total);
+    let volumes = storage["volumes"].as_array().unwrap();
+    assert!(!volumes.is_empty());
+    assert!(volumes.len() <= 3);
+}
 #[tokio::test]
 async fn anonymous_albums_keep_originals_on_external_storage_and_survive_restart() {
     let (tmp, app) = setup();
@@ -252,5 +266,138 @@ async fn photo_symlinks_cannot_escape_storage() {
             .await
             .status(),
         StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn albums_and_photos_can_be_renamed_moved_and_deleted() {
+    let (tmp, app) = setup();
+    for name in ["First", "Second"] {
+        assert_eq!(
+            send(
+                &app,
+                "POST",
+                "/api/albums",
+                format!(r#"{{"name":"{name}"}}"#).into_bytes(),
+                true,
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+    }
+    let uploaded = json(
+        send(
+            &app,
+            "POST",
+            "/api/albums/1/photos?name=original.png",
+            picture(),
+            true,
+        )
+        .await,
+    )
+    .await;
+    let id = uploaded["id"].as_i64().unwrap();
+    assert_eq!(
+        send(
+            &app,
+            "POST",
+            &format!("/api/photos/{id}/name"),
+            br#"{"name":"Renamed photo"}"#.to_vec(),
+            true,
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        send(
+            &app,
+            "POST",
+            &format!("/api/photos/{id}/album"),
+            br#"{"album_id":2}"#.to_vec(),
+            true,
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        send(
+            &app,
+            "POST",
+            "/api/albums/2/name",
+            br#"{"name":"Newest album"}"#.to_vec(),
+            true,
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let albums = json(send(&app, "GET", "/api/albums", vec![], false).await).await;
+    assert_eq!(albums[0]["name"], "Newest album");
+    assert_eq!(albums[0]["count"], 1);
+    assert_eq!(
+        json(send(&app, "GET", "/api/albums/2/photos", vec![], false).await).await[0]["name"],
+        "Renamed photo"
+    );
+    assert_eq!(
+        send(&app, "DELETE", &format!("/api/photos/{id}"), vec![], true,)
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(
+        std::fs::read_dir(tmp.path().join("external/photos"))
+            .unwrap()
+            .next()
+            .is_none()
+    );
+    assert_eq!(
+        send(&app, "DELETE", "/api/albums/2", vec![], true)
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        send(&app, "GET", "/api/albums/2/photos", vec![], false)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn deleting_an_album_removes_all_photo_files() {
+    let (tmp, app) = setup();
+    send(
+        &app,
+        "POST",
+        "/api/albums",
+        br#"{"name":"Disposable"}"#.to_vec(),
+        true,
+    )
+    .await;
+    for name in ["one.png", "two.png"] {
+        send(
+            &app,
+            "POST",
+            &format!("/api/albums/1/photos?name={name}"),
+            picture(),
+            true,
+        )
+        .await;
+    }
+    assert_eq!(
+        send(&app, "DELETE", "/api/albums/1", vec![], true)
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(
+        std::fs::read_dir(tmp.path().join("external/photos"))
+            .unwrap()
+            .next()
+            .is_none()
     );
 }

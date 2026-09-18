@@ -166,6 +166,45 @@ async fn authorization_streaming_and_persistence() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn parents_can_rename_movies_and_scans_preserve_the_title() {
+    let (_tmp, state) = setup();
+    let app = router(state.clone());
+    let cookie = login(&app).await;
+    let movie = list(&app, &cookie).await.remove(0);
+    assert_eq!(
+        request(
+            &app,
+            "POST",
+            &format!("/api/movies/{}/title", movie.id),
+            "",
+            r#"{"name":"No access"}"#,
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        request(
+            &app,
+            "POST",
+            &format!("/api/movies/{}/title", movie.id),
+            &cookie,
+            r#"{"name":" Family Favorite "}"#,
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    state.scan().unwrap();
+    let renamed = list(&app, &cookie)
+        .await
+        .into_iter()
+        .find(|item| item.id == movie.id)
+        .unwrap();
+    assert_eq!(renamed.title, "Family Favorite");
+}
 #[tokio::test]
 async fn session_expiry_csrf_and_scan_removal() {
     let (tmp, state) = setup();

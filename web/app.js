@@ -3,8 +3,8 @@ const $ = id => document.getElementById(id);
 let parent = false;
 let collection = [];
 let returnFocus;
-async function api(path, data) {
-  const response = await fetch(path, {method: data === undefined ? 'GET' : 'POST', headers: {'Content-Type': 'application/json', 'X-Requested-With': 'custom-plex'}, body: data === undefined ? undefined : JSON.stringify(data)});
+async function api(path, data, method) {
+  const response = await fetch(path, {method: method || (data === undefined ? 'GET' : 'POST'), headers: {'Content-Type': 'application/json', 'X-Requested-With': 'custom-plex'}, body: data === undefined ? undefined : JSON.stringify(data)});
   if (!response.ok) {
     if (response.status === 401) throw new Error('Please sign in with the parents password.');
     if (response.status === 429) throw new Error('Too many attempts. Please wait a minute.');
@@ -15,6 +15,50 @@ async function api(path, data) {
 }
 function report(error) { $('status').textContent = error.message; }
 function show(id) { for (const section of ['profiles','login','library','albums','album-detail']) $(section).hidden = section !== id; $('status').textContent = ''; }
+let editResolution;
+function askName(heading, value) {
+  return new Promise(resolve => {
+    editResolution = resolve; $('edit-heading').textContent = heading; $('edit-name').value = value;
+    $('edit-dialog').showModal(); $('edit-name').select();
+  });
+}
+function finishEdit(value) {
+  const resolve = editResolution; editResolution = null; $('edit-dialog').close(); resolve?.(value);
+}
+$('edit-form').onsubmit = event => { event.preventDefault(); finishEdit($('edit-name').value); };
+$('cancel-edit').onclick = () => finishEdit(null);
+$('edit-dialog').addEventListener('cancel', event => { event.preventDefault(); finishEdit(null); });
+let confirmResolution;
+function askDelete(message) {
+  return new Promise(resolve => {
+    confirmResolution = resolve; $('confirm-message').textContent = message;
+    $('confirm-dialog').showModal(); $('cancel-confirm').focus();
+  });
+}
+function finishConfirm(value) {
+  const resolve = confirmResolution; confirmResolution = null; $('confirm-dialog').close(); resolve?.(value);
+}
+$('cancel-confirm').onclick = () => finishConfirm(false);
+$('accept-confirm').onclick = () => finishConfirm(true);
+$('confirm-dialog').addEventListener('cancel', event => { event.preventDefault(); finishConfirm(false); });
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'Unavailable';
+  const units = ['B','KiB','MiB','GiB','TiB']; let unit = 0;
+  while (bytes >= 1024 && unit < units.length - 1) { bytes /= 1024; unit++; }
+  return `${bytes.toFixed(unit < 2 ? 0 : 1)} ${units[unit]}`;
+}
+async function loadStorage() {
+  try {
+    const storage = await api('/api/storage');
+    const used = storage.total - storage.available;
+    const percent = storage.total ? Math.round(used / storage.total * 100) : 0;
+    const heading = document.createElement('strong'); heading.textContent = `Media storage · ${percent}% used`;
+    const meter = document.createElement('progress'); meter.max = storage.total || 1; meter.value = used; meter.setAttribute('aria-label', 'Media storage used');
+    const summary = document.createElement('p'); summary.textContent = `${formatBytes(used)} used · ${formatBytes(storage.available)} available · ${formatBytes(storage.total)} total`;
+    const details = document.createElement('small'); details.textContent = storage.volumes.map(volume => `${volume.name}: ${formatBytes(volume.total - volume.available)} of ${formatBytes(volume.total)}`).join(' · ');
+    $('storage').replaceChildren(heading, meter, summary, details);
+  } catch (_) { $('storage').replaceChildren(Object.assign(document.createElement('p'), {textContent:'Storage usage is unavailable.'})); }
+}
 async function load() {
   collection = await api('/api/movies');
   $('profile-label').textContent = parent ? 'PARENTS · THE FULL COLLECTION' : 'BABY · LITTLE FAVORITES';
@@ -50,6 +94,16 @@ function render() {
       const approval = document.createElement('button'); approval.className = 'approval'; approval.textContent = movie.approved ? '✓ Available to Baby' : '+ Add to Baby'; approval.setAttribute('aria-pressed', String(movie.approved));
       approval.onclick = async () => { try { await api(`/api/movies/${movie.id}/approval`, {approved: !movie.approved}); movie.approved = !movie.approved; approval.textContent = movie.approved ? '✓ Available to Baby' : '+ Add to Baby'; approval.setAttribute('aria-pressed', String(movie.approved)); } catch(error) { report(error); } };
       card.append(approval);
+      const rename = document.createElement('button'); rename.className = 'approval'; rename.textContent = '✎ Rename title';
+      rename.onclick = async () => {
+        const name = await askName('Rename movie', movie.title);
+        if (name === null || name.trim() === movie.title) return;
+        try {
+          await api(`/api/movies/${movie.id}/title`, {name});
+          movie.title = name.trim(); render(); $('status').textContent = `Renamed to ${movie.title}.`;
+        } catch (error) { report(error); }
+      };
+      card.append(rename);
     }
     const imageActions = document.createElement('div'); imageActions.className = 'image-actions';
     const choose = document.createElement('button'); choose.textContent = 'Add / change image';
@@ -88,7 +142,7 @@ $('baby').onclick = async () => { try { await leaveParents(); await load(); } ca
 $('parents').onclick = async () => { try { const session = await api('/api/session'); if (session.parent) { parent = true; await load(); } else { show('login'); $('password').focus(); } } catch(error) { report(error); } };
 $('login-form').onsubmit = async event => { event.preventDefault(); const password = $('password').value; $('password').value = ''; try { await api('/api/login', {password}); parent = true; await load(); } catch(error) { report(error); } };
 $('cancel').onclick = () => { show('profiles'); $('parents').focus(); };
-$('home').onclick = async () => { try { await leaveParents(); show('profiles'); $('baby').focus(); } catch(error) { report(error); } };
+$('home').onclick = async () => { try { await leaveParents(); show('profiles'); loadStorage(); $('baby').focus(); } catch(error) { report(error); } };
 $('scan').onclick = async () => { $('scan').disabled = true; try { const count = await api('/api/scan', {}); await load(); $('status').textContent = `Library updated: ${count} movies.`; } catch(error) { report(error); } finally { $('scan').disabled = false; } };
 $('search').oninput = render;
 $('close-player').onclick = () => $('player').close();
@@ -104,3 +158,4 @@ document.addEventListener('keydown', event => {
   if (controls.length) { event.preventDefault(); controls[(index + step + controls.length) % controls.length].focus(); }
 });
 $('baby').focus();
+loadStorage();

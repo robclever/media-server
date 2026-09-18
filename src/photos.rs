@@ -13,10 +13,22 @@ use image::{
 use rand_core::{OsRng, RngCore};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
-use std::{io::Cursor, path::PathBuf};
+use std::{
+    io::Cursor,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tower_http::services::ServeFile;
 
 pub const MAX_UPLOAD: usize = 24 * 1024 * 1024;
+
+fn recent() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .min(i64::MAX as u128) as i64
+}
 #[derive(Serialize)]
 pub struct Album {
     id: i64,
@@ -38,9 +50,28 @@ pub struct Upload {
     name: String,
 }
 
+#[derive(Deserialize)]
+pub struct Rename {
+    name: String,
+}
+
+#[derive(Deserialize)]
+pub struct MovePhoto {
+    album_id: i64,
+}
+
+fn clean_name(value: &str, maximum: usize) -> ApiResult<&str> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().count() > maximum || value.chars().any(char::is_control) {
+        Err(StatusCode::BAD_REQUEST)
+    } else {
+        Ok(value)
+    }
+}
+
 pub async fn albums(State(app): State<App>) -> ApiResult<Json<Vec<Album>>> {
     let db = app.db.lock().unwrap();
-    let mut stmt = db.prepare("SELECT a.id,a.name,COUNT(p.id),MIN(p.id) FROM albums a LEFT JOIN photos p ON p.album_id=a.id GROUP BY a.id ORDER BY a.id DESC").map_err(internal)?;
+    let mut stmt = db.prepare("SELECT a.id,a.name,COUNT(p.id),MIN(p.id) FROM albums a LEFT JOIN photos p ON p.album_id=a.id GROUP BY a.id ORDER BY a.updated_at DESC,a.id DESC").map_err(internal)?;
     let rows = stmt
         .query_map([], |r| {
             Ok(Album {
@@ -57,13 +88,13 @@ pub async fn create(
     State(app): State<App>,
     Json(input): Json<NewAlbum>,
 ) -> ApiResult<(StatusCode, Json<Album>)> {
-    let name = input.name.trim();
-    if name.is_empty() || name.chars().count() > 120 || name.chars().any(char::is_control) {
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    let name = clean_name(&input.name, 120)?;
     let db = app.db.lock().unwrap();
-    db.execute("INSERT INTO albums(name) VALUES(?1)", [name])
-        .map_err(internal)?;
+    db.execute(
+        "INSERT INTO albums(name,updated_at) VALUES(?1,?2)",
+        params![name, recent()],
+    )
+    .map_err(internal)?;
     Ok((
         StatusCode::CREATED,
         Json(Album {
@@ -94,6 +125,11 @@ fn exists(app: &App, id: i64) -> ApiResult<()> {
 pub async fn list(State(app): State<App>, Path(id): Path<i64>) -> ApiResult<Json<Vec<Photo>>> {
     exists(&app, id)?;
     let db = app.db.lock().unwrap();
+    db.execute(
+        "UPDATE albums SET updated_at=?1 WHERE id=?2",
+        params![recent(), id],
+    )
+    .map_err(internal)?;
     let mut stmt = db
         .prepare("SELECT id,name FROM photos WHERE album_id=?1 ORDER BY id")
         .map_err(internal)?;
@@ -145,10 +181,7 @@ pub async fn upload(
     bytes: Bytes,
 ) -> ApiResult<(StatusCode, Json<Photo>)> {
     exists(&app, id)?;
-    let name = input.name.trim().to_owned();
-    if name.is_empty() || name.chars().count() > 255 || name.chars().any(char::is_control) {
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    let name = clean_name(&input.name, 255)?.to_owned();
     // Share a single expensive-image slot with movie covers on small Pis.
     let permit = app
         .cover_work
@@ -180,21 +213,221 @@ pub async fn upload(
             let _ = std::fs::remove_dir_all(&staging);
             return Err(internal(error));
         }
-        let db = app.db.lock().unwrap();
-        if let Err(error) = db.execute(
-            "INSERT INTO photos(album_id,name,storage,extension) VALUES(?1,?2,?3,?4)",
-            params![id, name, token, extension],
-        ) {
+        let mut db = app.db.lock().unwrap();
+        let tx = db.transaction().map_err(internal)?;
+        if let Err(error) = tx
+            .execute(
+                "INSERT INTO photos(album_id,name,storage,extension) VALUES(?1,?2,?3,?4)",
+                params![id, name, token, extension],
+            )
+            .and_then(|_| {
+                tx.execute(
+                    "UPDATE albums SET updated_at=?1 WHERE id=?2",
+                    params![recent(), id],
+                )
+            })
+        {
             let _ = std::fs::remove_dir_all(destination);
             return Err(internal(error));
         }
-        Ok((
-            StatusCode::CREATED,
-            Json(Photo {
-                id: db.last_insert_rowid(),
-                name,
-            }),
-        ))
+        let photo_id = tx.last_insert_rowid();
+        tx.commit().map_err(internal)?;
+        Ok((StatusCode::CREATED, Json(Photo { id: photo_id, name })))
+    })
+    .await
+    .map_err(internal)?
+}
+
+pub async fn rename_album(
+    State(app): State<App>,
+    Path(id): Path<i64>,
+    Json(input): Json<Rename>,
+) -> ApiResult<StatusCode> {
+    let name = clean_name(&input.name, 120)?;
+    let changed = app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE albums SET name=?1,updated_at=?2 WHERE id=?3",
+            params![name, recent(), id],
+        )
+        .map_err(internal)?;
+    if changed == 0 {
+        Err(StatusCode::NOT_FOUND)
+    } else {
+        Ok(StatusCode::NO_CONTENT)
+    }
+}
+
+pub async fn rename_photo(
+    State(app): State<App>,
+    Path(id): Path<i64>,
+    Json(input): Json<Rename>,
+) -> ApiResult<StatusCode> {
+    let name = clean_name(&input.name, 255)?;
+    let changed = app
+        .db
+        .lock()
+        .unwrap()
+        .execute("UPDATE photos SET name=?1 WHERE id=?2", params![name, id])
+        .map_err(internal)?;
+    if changed == 0 {
+        Err(StatusCode::NOT_FOUND)
+    } else {
+        Ok(StatusCode::NO_CONTENT)
+    }
+}
+
+pub async fn move_photo(
+    State(app): State<App>,
+    Path(id): Path<i64>,
+    Json(input): Json<MovePhoto>,
+) -> ApiResult<StatusCode> {
+    let mut db = app.db.lock().unwrap();
+    let tx = db.transaction().map_err(internal)?;
+    let destination: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM albums WHERE id=?1)",
+            [input.album_id],
+            |row| row.get(0),
+        )
+        .map_err(internal)?;
+    if !destination {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let changed = tx
+        .execute(
+            "UPDATE photos SET album_id=?1 WHERE id=?2",
+            params![input.album_id, id],
+        )
+        .map_err(internal)?;
+    if changed == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    tx.execute(
+        "UPDATE albums SET updated_at=?1 WHERE id=?2",
+        params![recent(), input.album_id],
+    )
+    .map_err(internal)?;
+    tx.commit().map_err(internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn stored_directory(root: &std::path::Path, storage: &str) -> ApiResult<PathBuf> {
+    if storage.len() != 32 || !storage.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    let path = root.join(storage).canonicalize().map_err(internal)?;
+    if path.parent() != Some(root) || !path.is_dir() {
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    Ok(path)
+}
+
+fn tombstone(root: &std::path::Path) -> PathBuf {
+    let mut random = [0u8; 16];
+    OsRng.fill_bytes(&mut random);
+    root.join(format!(
+        ".deleting-{}",
+        random
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    ))
+}
+
+pub async fn delete_photo(State(app): State<App>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+    tokio::task::spawn_blocking(move || {
+        let root = app.photos.canonicalize().map_err(internal)?;
+        let storage: String = app
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT storage FROM photos WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .map_err(|_| StatusCode::NOT_FOUND)?;
+        let source = stored_directory(&root, &storage)?;
+        let removed = tombstone(&root);
+        std::fs::rename(&source, &removed).map_err(internal)?;
+        let deleted = app
+            .db
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM photos WHERE id=?1", [id]);
+        if let Err(error) = deleted {
+            let _ = std::fs::rename(&removed, &source);
+            return Err(internal(error));
+        }
+        std::fs::remove_dir_all(removed).map_err(internal)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
+    .map_err(internal)?
+}
+
+pub async fn delete_album(State(app): State<App>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+    tokio::task::spawn_blocking(move || {
+        let root = app.photos.canonicalize().map_err(internal)?;
+        let storages = {
+            let db = app.db.lock().unwrap();
+            let found: bool = db
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM albums WHERE id=?1)",
+                    [id],
+                    |row| row.get(0),
+                )
+                .map_err(internal)?;
+            if !found {
+                return Err(StatusCode::NOT_FOUND);
+            }
+            let mut statement = db
+                .prepare("SELECT storage FROM photos WHERE album_id=?1")
+                .map_err(internal)?;
+            statement
+                .query_map([id], |row| row.get::<_, String>(0))
+                .map_err(internal)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(internal)?
+        };
+        let mut moved = Vec::new();
+        for storage in storages {
+            let source = match stored_directory(&root, &storage) {
+                Ok(path) => path,
+                Err(error) => {
+                    for (from, to) in moved.iter().rev() {
+                        let _ = std::fs::rename(to, from);
+                    }
+                    return Err(error);
+                }
+            };
+            let removed = tombstone(&root);
+            if let Err(error) = std::fs::rename(&source, &removed) {
+                for (from, to) in moved.iter().rev() {
+                    let _ = std::fs::rename(to, from);
+                }
+                return Err(internal(error));
+            }
+            moved.push((source, removed));
+        }
+        let result = (|| -> Result<(), rusqlite::Error> {
+            let mut db = app.db.lock().unwrap();
+            let tx = db.transaction()?;
+            tx.execute("DELETE FROM photos WHERE album_id=?1", [id])?;
+            tx.execute("DELETE FROM albums WHERE id=?1", [id])?;
+            tx.commit()
+        })();
+        if let Err(error) = result {
+            for (from, to) in moved.iter().rev() {
+                let _ = std::fs::rename(to, from);
+            }
+            return Err(internal(error));
+        }
+        for (_, removed) in moved {
+            std::fs::remove_dir_all(removed).map_err(internal)?;
+        }
+        Ok(StatusCode::NO_CONTENT)
     })
     .await
     .map_err(internal)?
@@ -245,9 +478,21 @@ pub async fn file(
 }
 
 pub fn initialize(db: &rusqlite::Connection, data: &std::path::Path) -> anyhow::Result<PathBuf> {
-    db.execute_batch("CREATE TABLE IF NOT EXISTS albums (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+    db.execute_batch("CREATE TABLE IF NOT EXISTS albums (id INTEGER PRIMARY KEY, name TEXT NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY, album_id INTEGER NOT NULL REFERENCES albums(id), name TEXT NOT NULL, storage TEXT NOT NULL UNIQUE, extension TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS photos_album ON photos(album_id);")?;
+    let has_updated_at = db
+        .prepare("PRAGMA table_info(albums)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .any(|name| name == "updated_at");
+    if !has_updated_at {
+        db.execute(
+            "ALTER TABLE albums ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
     let photos = data.join("photo-albums");
     std::fs::create_dir_all(&photos)?;
     Ok(photos)
@@ -272,11 +517,16 @@ pub fn routes() -> axum::Router<App> {
             }),
         )
         .route("/api/albums", get(albums).post(create))
+        .route("/api/albums/{id}", axum::routing::delete(delete_album))
+        .route("/api/albums/{id}/name", axum::routing::post(rename_album))
         .route(
             "/api/albums/{id}/photos",
             get(list)
                 .post(upload)
                 .layer(axum::extract::DefaultBodyLimit::max(MAX_UPLOAD)),
         )
+        .route("/api/photos/{id}", axum::routing::delete(delete_photo))
+        .route("/api/photos/{id}/name", axum::routing::post(rename_photo))
+        .route("/api/photos/{id}/album", axum::routing::post(move_photo))
         .route("/api/photos/{id}/{variant}", get(file))
 }

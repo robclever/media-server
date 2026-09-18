@@ -35,6 +35,8 @@ request('/api/login', 204, {'password': password}, True)
 movies = json.loads(request('/api/movies', authenticated=True))
 assert len(movies) == 1, 'Use an isolated library with exactly one sample movie'
 movie_id = movies[0]['id']
+request(f'/api/movies/{movie_id}/title', 204, {'name': 'Renamed sample'}, True)
+assert json.loads(request('/api/movies', authenticated=True))[0]['title'] == 'Renamed sample'
 media = f'/media/{movie_id}'
 approval = f'/api/movies/{movie_id}/approval'
 request(media, 404)
@@ -57,14 +59,21 @@ assert uploaded.startswith(b'\xff\xd8') and uploaded != generated
 # Photo Album creation and upload require no parent session.
 album = json.loads(request('/api/albums', 201, {'name': 'Family photos'}))
 photo = json.loads(request(f"/api/albums/{album['id']}/photos?name=sample.png", 201, png, headers={'Content-Type': 'image/png'}))
+destination = json.loads(request('/api/albums', 201, {'name': 'Recent album'}))
+request(f"/api/photos/{photo['id']}/name", 204, {'name': 'Renamed photo'})
+request(f"/api/photos/{photo['id']}/album", 204, {'album_id': destination['id']})
+request(f"/api/albums/{destination['id']}/name", 204, {'name': 'Moved photos'})
+request(f"/api/albums/{album['id']}", 204, method='DELETE')
 original_url = f"/api/photos/{photo['id']}/original"
 assert request(original_url) == png
 assert request(f"/api/photos/{photo['id']}/thumbnail").startswith(b'\xff\xd8')
+storage = json.loads(request('/api/storage'))
+assert storage['total'] > 0 and storage['available'] <= storage['total'] and storage['volumes']
 
 subprocess.run(['docker', 'compose', 'up', '-d', '--no-build', '--pull', 'never', '--force-recreate', '--wait'], check=True)
 assert request(original_url) == png, 'Photo original did not persist'
 albums = json.loads(request('/api/albums'))
-assert any(a['id'] == album['id'] and a['count'] == 1 for a in albums), 'Album did not persist'
+assert any(a['id'] == destination['id'] and a['name'] == 'Moved photos' and a['count'] == 1 for a in albums), 'Album management did not persist'
 
 persisted = json.loads(request('/api/movies'))
 assert len(persisted) == 1, f'Approval did not persist: {persisted}'
@@ -80,6 +89,9 @@ assert request(cover) == generated, 'Automatic cover did not return after reset'
 request(approval, 204, {'approved': False}, True)
 request(media, 404)
 request(cover, 404)
+request(f"/api/photos/{photo['id']}", 204, method='DELETE')
+request(original_url, 404)
+request(f"/api/albums/{destination['id']}", 204, method='DELETE')
 request('/api/logout', 204, {}, True)
 request('/api/scan', 401, {}, True)
-print('Container checks passed: login, approval, streaming, seeking, cover generation/upload/reset, photo albums, recreation, password persistence, revocation, logout.')
+print('Container checks passed: login, movie rename, approval, streaming, seeking, covers, photo album management, storage usage, recreation, password persistence, deletion, revocation, logout.')

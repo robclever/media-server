@@ -42,6 +42,8 @@ For a TV on the same home network, use `http://<this-macs-lan-ip>:8080`, not `lo
 
 - Profile chooser, searchable movie shelf, keyboard/remote navigation, and browser video playback.
 - Password-free Photo Album profile with named collections, multi-photo uploads, previews, and original downloads.
+- Rename movie titles, albums, and photos; move photos between albums; and delete photos or albums with confirmation.
+- Home-profile storage usage across the database, movie locations, and photo storage, with shared filesystems counted once.
 - Baby sees and streams only titles explicitly approved by a parent.
 - Parents can browse everything, scan the library, and change Baby approvals.
 - Argon2 password hashing, eight-hour sessions, logout, password reset, and login throttling.
@@ -336,6 +338,19 @@ Choose **Photo Album** on the profile screen. No password is required to view al
 2. In the album, select one or more pictures with **Add photos**, then choose **Upload selected photos**. Keep the page open until it reports how many were saved. Failed files are listed individually; successful uploads remain saved.
 3. Select a photo to open its larger preview. Use **Previous** / **Next** to browse and **Download original** to retrieve the unchanged upload.
 4. Choose **All albums** to return to the collections, or **Switch profile** to return home.
+
+### Manage names, albums, and photos
+
+- In **Parents**, choose **Rename title** on a movie card. The display title is stored in the database and remains after rescans; the video filename is unchanged. Baby sees the renamed title after the movie is approved.
+- Album cards have rename and trash icons along their lower edge. Renaming changes the display name. Deleting an album asks for confirmation and permanently removes the album, every photo in it, and each stored original/preview/thumbnail.
+- Open a photo to find rename, plus/move, and trash icons at the bottom of the preview. Rename changes its display title without renaming the stored file. Move opens the available album list; the most recently opened, created, uploaded-to, or moved-to album is offered first. The current album is omitted.
+- Deleting a photo asks for confirmation and permanently removes its original plus generated browsing images. These deletions do not have an in-app trash or undo. Back up the photo storage and database together.
+
+Photo and album management remains password-free, matching the Photo Album profile. Anyone who can reach the server on the trusted home network can rename, move, or permanently delete photos and albums.
+
+### Home storage usage
+
+The profile chooser shows used, available, and total space across the app database, configured movie locations, and photo storage. Locations on the same filesystem are counted once, so the Passport movie and photo folders do not inflate the total. The per-volume line identifies which configured area contributed each capacity figure. This is filesystem capacity rather than the exact byte size of indexed media; unrelated files on the same drive are included.
 
 Supported uploads: JPEG, PNG, and WebP, up to **24 MiB per file**, at most **8192 pixels per side**, within the decoder's memory limit. iPhone HEIC/HEIF and Live Photo videos are not supported: export pictures as JPEG first, or use the iPhone Camera's **Most Compatible** format for future photos. Animated files produce a still preview. EXIF orientation is applied to previews; originals retain their original bytes and metadata. Do not upload files you do not want other users of this server to download.
 
@@ -731,6 +746,8 @@ To restore the default data path, stop the service, move the current `data` dire
 | `.local` address fails | Use the Pi IP address. |
 
 ## Validation status
+
+Photo-management update (September 17, 2026): all 15 Rust integration tests passed (six photo/storage scenarios and nine movie/auth/streaming scenarios), along with formatting, Clippy with warnings denied, JavaScript syntax checks, and four deployment-script tests. The isolated Docker check verified movie rename, photo/album rename and move, storage reporting, original-file persistence across container recreation, permanent photo/album deletion, password persistence, covers, streaming, and authorization. Browser checks verified the home storage meter, embedded rename dialogs, album/photo rename, photo-preview action icons, recently used album ordering, moving a photo, updated album counts, and the permanent-delete confirmation. The local port-8080 server was updated after a backup at `backups/before-photo-management-20260917T203500Z/data.tar.gz`; its password account and movie approvals were unchanged. This update is not yet deployed to the Pi because its exFAT mount must first be made writable by container group `10001` as described in [Prepare the Pi photo drive](#prepare-the-pi-photo-drive).
 
 Cover-image update (September 17, 2026): all eight Rust integration tests and Clippy passed. ARM64 Docker checks verified FFmpeg frame extraction, anonymous image upload for approved movies, persistence across recreation, reset to automatic imagery, and access denial after approval revocation. Browser checks verified Baby's file picker, successful upload and immediate image display, plus automatic cover reset. GitHub Actions runs the extended container checks on its next run; the thumbnail feature was deployed to the physical Pi on September 17, 2026. Docker health and LAN health checks passed, the deployed frontend includes thumbnail controls, and the password account and movie approvals matched the pre-deployment backup. Playback and thumbnail interaction on the physical Pi still need user verification.
 
