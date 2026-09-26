@@ -383,11 +383,17 @@ On the Pi, inspect and back up the mount configuration:
 
 ```sh
 findmnt -no SOURCE,TARGET,FSTYPE,OPTIONS /mnt/dvd-library
-sudo cp -p /etc/fstab /etc/fstab.before-photo-albums
-sudo nano /etc/fstab
+sudo cp -p /etc/fstab \
+  "/etc/fstab.before-photo-albums-$(date -u +%Y%m%dT%H%M%SZ)"
+
+sudo sed -i \
+  's|uid=1000,gid=1000,umask=022|uid=1000,gid=10001,fmask=0002,dmask=0002|' \
+  /etc/fstab
+
+grep '48BD-B0F0' /etc/fstab
 ```
 
-In the **existing** entry for UUID `48BD-B0F0` at `/mnt/dvd-library`, keep its UUID, mount path, filesystem, and other options. Replace the ownership/mask options with `uid=1000,gid=10001,fmask=0002,dmask=0002`. This keeps `rob` as owner and lets the container's group write. Do not add a second entry. Check your edited file:
+This updates the **existing** entry for UUID `48BD-B0F0` at `/mnt/dvd-library`, keeping its UUID, mount path, filesystem, and other options. The resulting entry must contain `uid=1000,gid=10001,fmask=0002,dmask=0002`. This keeps `rob` as owner and lets the container's group write. Do not add a second entry. If the `sed` command does not change the line because its options differ, edit that existing line with `sudo nano /etc/fstab` instead. Check the file before applying it:
 
 ```sh
 sudo findmnt --verify --verbose
@@ -398,6 +404,7 @@ After resolving any configuration errors, apply the change during a playback bre
 ```sh
 cd /home/rob/custom-plex
 sudo docker compose stop app
+cd /home/rob
 sudo umount /mnt/dvd-library && sudo mount /mnt/dvd-library
 findmnt -no TARGET,FSTYPE,OPTIONS /mnt/dvd-library
 ```
@@ -408,7 +415,7 @@ Do not force-unmount a busy drive. If unmounting fails, stop the process using i
 mountpoint -q /mnt/dvd-library && sudo docker compose up -d --no-build --pull never --wait
 ```
 
-Then run the deployment script from the Mac. It creates the photo folder and checks that the container can write to it. On an ext4 drive instead, create the chosen photo folder and grant UID/GID `10001` access with ordinary directory ownership/permissions.
+Then run `python3 scripts/deploy_pi.py` from this repository on the Mac. It creates the photo folder and checks a real write as UID/GID `10001` before stopping the existing server. On an ext4 drive instead, create the chosen photo folder and grant UID/GID `10001` access with ordinary directory ownership/permissions.
 
 ### Back up albums
 
@@ -747,7 +754,9 @@ To restore the default data path, stop the service, move the current `data` dire
 
 ## Validation status
 
-Photo-management update (September 17, 2026): all 15 Rust integration tests passed (six photo/storage scenarios and nine movie/auth/streaming scenarios), along with formatting, Clippy with warnings denied, JavaScript syntax checks, and four deployment-script tests. The isolated Docker check verified movie rename, photo/album rename and move, storage reporting, original-file persistence across container recreation, permanent photo/album deletion, password persistence, covers, streaming, and authorization. Browser checks verified the home storage meter, embedded rename dialogs, album/photo rename, photo-preview action icons, recently used album ordering, moving a photo, updated album counts, and the permanent-delete confirmation. The local port-8080 server was updated after a backup at `backups/before-photo-management-20260917T203500Z/data.tar.gz`; its password account and movie approvals were unchanged. This update is not yet deployed to the Pi because its exFAT mount must first be made writable by container group `10001` as described in [Prepare the Pi photo drive](#prepare-the-pi-photo-drive).
+Photo-management update (September 17–18, 2026): all 15 Rust integration tests passed (six photo/storage scenarios and nine movie/auth/streaming scenarios), along with formatting, Clippy with warnings denied, JavaScript syntax checks, and four deployment-script tests. The isolated Docker check verified movie rename, photo/album rename and move, storage reporting, original-file persistence across container recreation, permanent photo/album deletion, password persistence, covers, streaming, and authorization. Browser checks verified the home storage meter, embedded rename dialogs, album/photo rename, photo-preview action icons, recently used album ordering, moving a photo, updated album counts, and the permanent-delete confirmation. The local port-8080 server was updated after a backup at `backups/before-photo-management-20260917T203500Z/data.tar.gz`; its password account and movie approvals were unchanged.
+
+The update was deployed to the physical Pi on September 18, 2026. Its Passport was remounted with `uid=1000,gid=10001,fmask=0002,dmask=0002`; the previous fstab is `/etc/fstab.before-photo-albums-20260918T010605Z`. Photo storage is `/mnt/dvd-library/Custom-Plex-Photos/photo-albums`. The deployment backup is `/home/rob/custom-plex-backups/20260918T010752Z`, and the rollback image is `custom-plex:before-20260918t010752z`. Docker and LAN health checks passed, the new frontend and storage API responded, and database comparison verified that the password account and movie approvals were unchanged. An end-to-end Pi test created an album, saved and downloaded the unchanged original, generated a thumbnail, and then permanently removed the disposable test album and photo. Actual use from the family's phones and TV remains to be checked.
 
 Cover-image update (September 17, 2026): all eight Rust integration tests and Clippy passed. ARM64 Docker checks verified FFmpeg frame extraction, anonymous image upload for approved movies, persistence across recreation, reset to automatic imagery, and access denial after approval revocation. Browser checks verified Baby's file picker, successful upload and immediate image display, plus automatic cover reset. GitHub Actions runs the extended container checks on its next run; the thumbnail feature was deployed to the physical Pi on September 17, 2026. Docker health and LAN health checks passed, the deployed frontend includes thumbnail controls, and the password account and movie approvals matched the pre-deployment backup. Playback and thumbnail interaction on the physical Pi still need user verification.
 
