@@ -1,4 +1,6 @@
 mod covers;
+mod photos;
+mod storage;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use axum::{
     Json, Router,
@@ -25,7 +27,9 @@ type ApiResult<T> = Result<T, StatusCode>;
 pub struct App {
     db: Arc<Mutex<Connection>>,
     media: BTreeMap<String, PathBuf>,
+    data: PathBuf,
     secure: bool,
+    photos: PathBuf,
     attempts: Arc<Mutex<Vec<i64>>>,
     cover_work: Arc<tokio::sync::Semaphore>,
 }
@@ -74,9 +78,10 @@ impl App {
             }
         }
         std::fs::create_dir_all(&data)?;
+        let data = data.canonicalize()?;
         let mut db = Connection::open(data.join("library.sqlite3"))?;
         db.busy_timeout(std::time::Duration::from_secs(5))?;
-        db.execute_batch("PRAGMA journal_mode=DELETE; CREATE TABLE IF NOT EXISTS account (id INTEGER PRIMARY KEY CHECK(id=1), hash TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, expires INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS movies (id INTEGER PRIMARY KEY, path TEXT UNIQUE NOT NULL, title TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, present INTEGER NOT NULL DEFAULT 1);")?;
+        db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS account (id INTEGER PRIMARY KEY CHECK(id=1), hash TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, expires INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS movies (id INTEGER PRIMARY KEY, path TEXT UNIQUE NOT NULL, title TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, present INTEGER NOT NULL DEFAULT 1);")?;
         // Rebuild the legacy unique-path table atomically, retaining movie IDs and approvals.
         let has_source: bool = db
             .prepare("PRAGMA table_info(movies)")?
@@ -93,6 +98,7 @@ impl App {
             tx.commit()?;
         }
         db.execute_batch("CREATE TABLE IF NOT EXISTS covers (movie_id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, jpeg BLOB NOT NULL);")?;
+        let photos = photos::initialize(&db, &data)?;
         // Removed sources must never remain visible between startup and the first scan.
         let tx = db.transaction()?;
         let known = media.keys().cloned().collect::<Vec<_>>();
@@ -110,7 +116,9 @@ impl App {
         Ok(Self {
             db: Arc::new(Mutex::new(db)),
             media,
+            data,
             secure,
+            photos,
             attempts: Arc::new(Mutex::new(Vec::new())),
             cover_work: Arc::new(tokio::sync::Semaphore::new(1)),
         })
@@ -235,6 +243,8 @@ pub fn router(app: App) -> Router {
                 )
             }),
         )
+        .merge(photos::routes())
+        .merge(storage::routes())
         .route("/health", get(|| async { "ok" }))
         .route("/api/session", get(session))
         .route("/api/login", post(login))
@@ -242,6 +252,7 @@ pub fn router(app: App) -> Router {
         .route("/api/movies", get(movies))
         .route("/api/scan", post(scan))
         .route("/api/movies/{id}/approval", post(approve))
+        .route("/api/movies/{id}/title", post(rename_movie))
         .route("/media/{id}", get(stream))
         .route(
             "/api/movies/{id}/cover",
@@ -373,6 +384,43 @@ async fn scan(State(app): State<App>, headers: HeaderMap) -> ApiResult<Json<usiz
 #[derive(Deserialize)]
 struct Approval {
     approved: bool,
+}
+
+#[derive(Deserialize)]
+struct Rename {
+    name: String,
+}
+
+fn valid_name(name: &str, maximum: usize) -> bool {
+    !name.is_empty() && name.chars().count() <= maximum && !name.chars().any(char::is_control)
+}
+
+async fn rename_movie(
+    State(app): State<App>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+    Json(input): Json<Rename>,
+) -> ApiResult<StatusCode> {
+    if !app.parent(&headers) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let name = input.name.trim();
+    if !valid_name(name, 255) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let changed = app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE movies SET title=?1 WHERE id=?2 AND present=1",
+            params![name, id],
+        )
+        .map_err(internal)?;
+    if changed == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 async fn approve(
     State(app): State<App>,

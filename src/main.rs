@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
         })?,
         _ => std::collections::BTreeMap::from([("default".to_owned(), media)]),
     };
-    let app = App::open_sources(
+    let mut app = App::open_sources(
         sources,
         data,
         env::var("COOKIE_SECURE").as_deref() == Ok("true"),
@@ -30,6 +30,10 @@ async fn main() -> anyhow::Result<()> {
         app.set_password(&password)?;
         println!("Parents password updated; all sessions revoked.");
         return Ok(());
+    }
+    if let Ok(path) = env::var("PHOTO_DIR") {
+        anyhow::ensure!(!path.trim().is_empty(), "PHOTO_DIR must not be empty");
+        app = app.with_photo_directory(PathBuf::from(path))?;
     }
     println!("Indexed {} movies", app.scan()?);
     let address = env::var("APP_BIND").unwrap_or_else(|_| "127.0.0.1:8080".into());

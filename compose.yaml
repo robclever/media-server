@@ -9,10 +9,16 @@ services:
       MEDIA_DIR: /media
       MEDIA_SOURCES: ${MEDIA_SOURCES:-}
       DATA_DIR: /data
+      PHOTO_DIR: /photos/photo-albums
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
     volumes:
       - ${HOST_MEDIA_DIR:-./media}:/media:ro
       - ${HOST_DATA_DIR:-./data}:/data
+      - type: bind
+        source: ${HOST_PHOTO_DIR:-${HOST_DATA_DIR:-./data}}
+        target: /photos
+        bind:
+          create_host_path: false
     restart: unless-stopped
     read_only: true
     tmpfs:
