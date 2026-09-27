@@ -14,7 +14,20 @@
 <label>Time per photo <select id="slide-interval"><option value="3">3 seconds</option><option value="5" selected>5 seconds</option><option value="10">10 seconds</option><option value="15">15 seconds</option><option value="30">30 seconds</option></select></label>
 <label>Transition effect <select id="slide-effect"><option value="none" selected>None</option><option value="fade">Fade</option><option value="slide">Slide</option><option value="zoom">Zoom</option></select></label>
 <label>Transition duration <select id="slide-duration"><option value="300">Quick (0.3 seconds)</option><option value="600" selected>Normal (0.6 seconds)</option><option value="1000">Slow (1 second)</option><option value="2000">Very slow (2 seconds)</option></select></label>
-<small>Saved in this browser. Exit fullscreen with × to change options.</small></fieldset>
+<label>Photo order <select id="slide-shuffle"><option value="off">Album order</option><option value="on">Shuffle</option></select></label>
+<label>Captions <select id="slide-captions"><option value="off">Off</option><option value="brief">Brief (3 seconds)</option><option value="always">Always</option></select></label>
+<small>Options are remembered in this browser. Save a preset to share them across devices.</small></fieldset>
+<details class="slideshow-setup"><summary>Albums, presets &amp; music</summary>
+<fieldset><legend>Albums for this slideshow</legend><div id="slide-albums"></div></fieldset>
+<label for="slide-preset">Saved presets</label><select id="slide-preset"><option value="">Choose a preset</option></select>
+<button id="slide-load-preset">Load preset</button>
+<label for="slide-preset-name">Preset name</label><input id="slide-preset-name" maxlength="80" placeholder="Sunday memories">
+<button id="slide-save-preset">Save new preset</button><button id="slide-update-preset" disabled>Update preset</button><button id="slide-delete-preset" disabled>Delete preset</button>
+<label for="slide-spotify">Spotify playlist, album, or track link</label><input id="slide-spotify" type="url" placeholder="https://open.spotify.com/playlist/…">
+<a id="slide-open-spotify" target="_blank" rel="noopener noreferrer" hidden>Open in Spotify ↗</a>
+<p>Spotify plays separately. Start and control music in Spotify; slideshow controls do not control Spotify playback.</p>
+<p id="slide-setup-status" role="status"></p>
+</details>
 <div class="slideshow-controls"><button id="slide-previous">Previous slide</button><button id="slide-pause">Pause slideshow</button><button id="slide-next">Next slide</button><button id="slide-fullscreen">Enter fullscreen</button></div>
 </div></dialog>
 <dialog id="move-dialog"><div class="player-heading"><h2>Move photo</h2><button id="cancel-move">Cancel</button></div><p>Choose a destination album. Your most recently used album appears first.</p><div id="album-destinations" class="menu-list"></div></dialog>

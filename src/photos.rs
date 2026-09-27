@@ -198,14 +198,45 @@ pub async fn set_slideshow(
     }
 }
 
-/// Returns a fresh playlist in album/photo ID order, without changing recent use.
-/// Empty and unselected albums contribute no photos; moves and deletions are
-/// reflected on the next request. Preview URLs use the existing photo endpoint.
-pub async fn slideshow(State(app): State<App>) -> ApiResult<Json<Vec<Photo>>> {
+#[derive(Deserialize)]
+/// Optional explicit album selection; an empty value returns no photos.
+pub struct SlideshowAlbums {
+    albums: Option<String>,
+}
+
+/// Loads either the default selection or explicitly requested album IDs.
+/// Results are ordered by album/photo ID without changing recent use; moves
+/// and deletions are reflected on the next request.
+pub async fn slideshow(
+    State(app): State<App>,
+    Query(query): Query<SlideshowAlbums>,
+) -> ApiResult<Json<Vec<Photo>>> {
     let db = app.db.lock().unwrap();
-    let mut stmt = db.prepare("SELECT p.id,p.name,p.description FROM photos p JOIN albums a ON a.id=p.album_id WHERE a.slideshow=1 ORDER BY a.id,p.id").map_err(internal)?;
+    let ids = query
+        .albums
+        .as_ref()
+        .map(|value| {
+            if value.is_empty() {
+                return Ok(Vec::new());
+            }
+            let ids = value
+                .split(',')
+                .map(|id| id.parse::<i64>().map_err(|_| StatusCode::BAD_REQUEST))
+                .collect::<Result<Vec<_>, _>>()?;
+            if ids.len() > 500 || ids.iter().any(|id| *id <= 0) {
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            Ok(ids)
+        })
+        .transpose()?;
+    let condition = if let Some(ids) = &ids {
+        format!("a.id IN ({})", vec!["?"; ids.len()].join(","))
+    } else {
+        "a.slideshow=1".to_owned()
+    };
+    let mut stmt = db.prepare(&format!("SELECT p.id,p.name,p.description FROM photos p JOIN albums a ON a.id=p.album_id WHERE {condition} ORDER BY a.id,p.id")).map_err(internal)?;
     let rows = stmt
-        .query_map([], |r| {
+        .query_map(rusqlite::params_from_iter(ids.iter().flatten()), |r| {
             Ok(Photo {
                 id: r.get(0)?,
                 name: r.get(1)?,

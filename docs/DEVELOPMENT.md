@@ -75,3 +75,7 @@ The Pi deployer assumes an existing configured installation. It must preserve `.
 Fullscreen browser assertions verify that the image occupies the entire viewport, captions and toolbar are hidden, and the × button exits fullscreen while keeping the slideshow open and restoring focus. Space toggles playback in fullscreen.
 
 The slideshow options browser test checks the selected advance interval, rendered animation opacity and keyframes for all effects, duration, settings after reload, reduced-motion behavior, and hidden options in fullscreen.
+
+The short TV viewport test uses a 960 × 480 browser window. It verifies that scrolling changes the slideshow dialog's scroll position, leaves the document behind it fixed, and keeps the sticky fullscreen controls inside the viewport.
+
+Preset server tests cover validation, mutation protection, explicit album filtering, restart persistence, update/delete semantics, and independence from default album flags. The browser test creates real photos, checks shuffle uniqueness and pass boundaries, verifies caption expiry and fullscreen overlays, and saves/loads/updates/deletes a preset across independent browser contexts. Spotify links are checked for canonical destinations and unsafe URL rejection; tests do not require or claim Spotify playback.

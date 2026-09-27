@@ -17,6 +17,7 @@
 mod covers;
 mod photos;
 mod playback;
+mod slideshow;
 mod storage;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use axum::{
@@ -137,6 +138,7 @@ impl App {
         db.execute_batch("CREATE TABLE IF NOT EXISTS covers (movie_id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, jpeg BLOB NOT NULL);")?;
         playback::initialize(&db)?;
         let photos = photos::initialize(&db, &data)?;
+        slideshow::initialize(&db)?;
         // Removed sources must never remain visible between startup and the first scan.
         let tx = db.transaction()?;
         let known = media.keys().cloned().collect::<Vec<_>>();
@@ -308,6 +310,7 @@ pub fn router(app: App) -> Router {
             }),
         )
         .merge(photos::routes())
+        .merge(slideshow::routes())
         .merge(playback::routes())
         .merge(storage::routes())
         .route("/health", get(|| async { "ok" }))

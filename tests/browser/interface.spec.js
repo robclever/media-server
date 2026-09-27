@@ -269,3 +269,113 @@ test('slideshow timing and effects persist and respect reduced motion', async ({
   await page.getByLabel('Transition effect').selectOption('none');
   await expect(page.getByLabel('Transition duration')).toBeDisabled();
 });
+
+test('slideshow scroll stays inside the dialog on a short TV viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 480 });
+  await page.route('**/api/slideshow', route => route.fulfill({ json: [
+    { id: 900010, name: 'TV photo', description: 'A caption for the short viewport.' },
+  ] }));
+  await page.route('**/api/photos/900010/preview', route => route.fulfill({
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="blue"/></svg>',
+  }));
+  await page.goto('/');
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const pageScrollBefore = await page.evaluate(() => scrollY);
+  await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+
+  const dialog = page.locator('#slideshow-player');
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('body')).toHaveClass(/slideshow-open/);
+  await expect(page.getByRole('button', { name: 'Enter fullscreen', exact: true })).toBeVisible();
+  await expect.poll(() => dialog.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+
+  await dialog.hover();
+  await page.mouse.wheel(0, 1200);
+  await expect.poll(() => dialog.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => scrollY)).toBe(pageScrollBefore);
+  await expect(page.getByRole('button', { name: 'Enter fullscreen', exact: true })).toBeVisible();
+  const controls = await page.locator('.slideshow-controls').boundingBox();
+  expect(controls).not.toBeNull();
+  expect(controls.y + controls.height).toBeLessThanOrEqual(480);
+
+  await page.getByRole('button', { name: 'Close slideshow' }).click();
+  await expect(page.locator('body')).not.toHaveClass(/slideshow-open/);
+});
+
+test('shuffle, fullscreen captions, and shared presets work through browser controls', async ({ page, request, browser }) => {
+  let albumId, presetId;
+  const spotify = 'https://open.spotify.com/playlist/0123456789012345678901';
+  try {
+    albumId = (await (await request.post('/api/albums', { headers: requestHeaders, data: { name: 'Preset album' } })).json()).id;
+    await page.goto('/');
+    await page.evaluate(async id => {
+      const canvas = document.createElement('canvas'); canvas.width = 20; canvas.height = 10;
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      for (let n = 1; n <= 4; n++) {
+        const response = await fetch(`/api/albums/${id}/photos?name=Memory-${n}`, { method: 'POST', headers: { 'X-Requested-With': 'custom-plex' }, body: blob });
+        if (!response.ok) throw new Error('Upload failed');
+      }
+    }, albumId);
+    await page.clock.install();
+    await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+    await page.getByText('Albums, presets & music', { exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Preset album', exact: true }).check();
+    await expect(page.locator('#slide-status')).toHaveText('1 of 4');
+    await page.getByRole('button', { name: 'Pause slideshow', exact: true }).click();
+    await page.getByLabel('Photo order').selectOption('on');
+    const seen = [];
+    for (let n = 0; n < 4; n++) {
+      seen.push(await page.locator('#slide-image').getAttribute('src'));
+      await page.getByRole('button', { name: 'Next slide', exact: true }).click();
+    }
+    expect(new Set(seen).size).toBe(4);
+    expect(await page.locator('#slide-image').getAttribute('src')).not.toBe(seen[3]);
+    await page.getByRole('combobox', { name: 'Captions', exact: true }).selectOption('brief');
+    await page.getByRole('button', { name: 'Enter fullscreen', exact: true }).click();
+    await expect(page.locator('#slide-caption')).toBeVisible();
+    await page.clock.fastForward(3000);
+    await expect(page.locator('#slide-caption')).not.toBeVisible();
+    await expect(page.locator('#slide-exit-fullscreen')).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('#slide-status')).toHaveText('2 of 4');
+    await expect(page.locator('#slide-caption')).toBeVisible();
+    await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Captions', exact: true }).selectOption('always');
+    await page.getByLabel('Time per photo').selectOption('15');
+    await page.getByLabel('Spotify playlist, album, or track link').fill(spotify + '?si=tracking');
+    await expect(page.getByRole('link', { name: 'Open in Spotify' })).toHaveAttribute('href', spotify);
+    await page.getByLabel('Preset name', { exact: true }).fill('Evening preset');
+    await page.getByRole('button', { name: 'Save new preset', exact: true }).click();
+    await expect(page.locator('#slide-setup-status')).toHaveText('Saved Evening preset.');
+    presetId = Number(await page.locator('#slide-preset').inputValue());
+    const second = await browser.newContext();
+    try {
+      const other = await second.newPage();
+      await other.goto('http://127.0.0.1:18084/');
+      await other.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+      await other.getByText('Albums, presets & music', { exact: true }).click();
+      await other.getByLabel('Saved presets').selectOption(String(presetId));
+      await other.getByRole('button', { name: 'Load preset', exact: true }).click();
+      await expect(other.locator('#slide-status')).toHaveText('1 of 4');
+      await expect(other.getByLabel('Time per photo')).toHaveValue('15');
+      await expect(other.getByLabel('Photo order')).toHaveValue('on');
+      await expect(other.getByRole('combobox', { name: 'Captions', exact: true })).toHaveValue('always');
+      await expect(other.getByRole('link', { name: 'Open in Spotify' })).toHaveAttribute('href', spotify);
+      await other.getByLabel('Preset name', { exact: true }).fill('Updated preset');
+      await other.getByRole('button', { name: 'Update preset', exact: true }).click();
+      await expect(other.locator('#slide-setup-status')).toHaveText('Saved Updated preset.');
+      await other.getByLabel('Spotify playlist, album, or track link').fill('javascript:alert(1)');
+      await expect(other.getByRole('link', { name: 'Open in Spotify' })).not.toBeVisible();
+      await other.getByRole('button', { name: 'Update preset', exact: true }).click();
+      await expect(other.locator('#slide-setup-status')).toContainText('Use a Spotify');
+      await other.getByRole('button', { name: 'Delete preset', exact: true }).click();
+      await expect(other.locator('#slide-setup-status')).toContainText('Preset deleted');
+    } finally { await second.close(); }
+    const albums = await (await request.get('/api/albums')).json();
+    expect(albums.find(a => a.id === albumId).slideshow).toBe(false);
+  } finally {
+    if (presetId) await request.delete(`/api/slideshow/presets/${presetId}`, { headers: requestHeaders });
+    if (albumId) await request.delete(`/api/albums/${albumId}`, { headers: requestHeaders });
+  }
+});

@@ -276,3 +276,9 @@ The homepage controller loads a fresh playlist on each opening, discards respons
 Fullscreen places the image across the entire viewport with `object-fit: contain`, hides the dialog heading/captions/toolbar, and overlays a single accessible × exit button. Native fullscreen change events move focus between that exit button and the windowed fullscreen control.
 
 Slideshow timing/effect preferences are validated against the UI choices and stored in browser local storage (`slideshow-options`), with 5 seconds, no effect, and a 600 ms transition as defaults. Storage failure falls back to in-memory settings. The timer uses the selected interval; incoming loaded images animate through the Web Animations API. Replacing an image, changing effect settings, or closing cancels the prior animation. Reduced-motion preferences suppress effects. No server schema or endpoint changes are required.
+
+### Shared presets and slideshow presentation
+
+`src/slideshow.rs` adds the `slideshow_presets` table containing validated JSON preset records. Presets are included in existing database backups. Routes inherit mutation-header protection and the password-free photo access model. Explicit playlist album IDs use bound SQL parameters; they do not mutate default album flags or recent-use ordering. The frontend skips stale album references and discards overlapping playlist responses.
+
+Shuffle uses Fisher–Yates for each full pass and avoids repeating the last photo at the beginning of the next pass. Caption visibility has its own three-second timer for Brief mode, cleared on close, while Always mode remains visible in fullscreen. Presets capture options and album choices, not photo snapshots. New photos in saved albums are included on the next load. A canonical Spotify link opens an external page with `noopener noreferrer`; no third-party scripts, frames, credentials, or playback integration are added.
