@@ -11,3 +11,4 @@ test-results/
 compose.override.yaml
 MYSERVER.md
 backups/
+scripts/ripping/output/

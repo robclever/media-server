@@ -3,13 +3,21 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+import deploy_pi
 import deploy_pi_remote
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_source_archive_excludes_local_rip_output(self):
+        output = tarfile.TarInfo('scripts/ripping/output/movie/movie.mp4')
+        script = tarfile.TarInfo('scripts/ripping/bluray_rip.py')
+        self.assertIsNone(deploy_pi.source_archive_filter(output))
+        self.assertIs(deploy_pi.source_archive_filter(script), script)
+
     def exercise(self, fail_start=False):
         calls = []
         with tempfile.TemporaryDirectory() as tmp:

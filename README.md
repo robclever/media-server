@@ -6,9 +6,10 @@ This is a standalone Plex-like application. It does not use official Plex client
 
 ## Project documentation
 
-- [Architecture](docs/ARCHITECTURE.md): runtime components, request flow, persistence, filesystems, authentication, and deployment design.
+- [Architecture](docs/ARCHITECTURE.md): Rust configuration and startup, shared state, runtime components, request flow, persistence, filesystems, authentication, and deployment design.
 - [HTTP API](docs/API.md): routes, access rules, payloads, responses, and status codes.
 - [Development guide](docs/DEVELOPMENT.md): repository map, documentation conventions, verification, and feature-development checklists.
+- [DVD and Blu-ray ripping tools](scripts/ripping/README.md): scan discs, rip and convert movies, and publish them to the Pi library.
 - Rust API documentation: run `RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --document-private-items`, then open `target/doc/custom_plex/index.html`.
 
 Rustdoc is the primary code-reference tool for this project. It understands Rust modules and types directly and is checked by CI. Doxygen is not required.
@@ -20,6 +21,7 @@ Rustdoc is the primary code-reference tool for this project. It understands Rust
 - **Update the existing Pi from this Mac:** run `python3 scripts/deploy_pi.py`; see [Deploy updates from your Mac](#deploy-updates-from-your-mac).
 - **Create photo albums:** see [Photo Album](#photo-album) for uploads and external-drive storage.
 - **Add your movies:** follow [Add movies step by step](#add-movies-step-by-step).
+- **Rip a disc on this Mac:** follow the [DVD and Blu-ray ripping guide](scripts/ripping/README.md).
 - **Deploy a future published release:** use the numbered [Raspberry Pi deployment instructions](#deploy-on-a-raspberry-pi).
 
 Run commands on the machine named above each example. Replace `PI_USER` and `PI_ADDRESS` with your Pi's login name and IP address; these are placeholders, not literal credentials. `localhost` always means the device on which the browser or command is running.
@@ -64,7 +66,7 @@ For a TV on the same home network, use `http://<this-macs-lan-ip>:8080`, not `lo
 - Docker Compose with persistent data, read-only media, health checks, and automatic restarts.
 - GitHub Actions configuration for Rust checks, native AMD64/ARM64 container tests, and versioned image publishing.
 
-No DVD ripping, live transcoding, online poster lookup, external subtitles, native TV app, or internet-facing deployment is included. Titles come from filenames; covers use uploaded images, matching local artwork, or automatically extracted movie frames.
+DVD and Blu-ray ripping plus offline conversion are available through the local command-line tools in `scripts/ripping/`. Live server transcoding, online poster lookup, external subtitles, a native TV app, and internet-facing deployment are not included. Titles come from filenames; covers use uploaded images, matching local artwork, or automatically extracted movie frames.
 
 ## Quick start: local Rust development
 
@@ -476,8 +478,9 @@ This is the usable deployment path now, before a GitHub release image exists. Co
 ```sh
 cd /Users/robclever/Documents/programming/custom_plex
 tar -czf /tmp/custom-plex-source.tar.gz \
+  --exclude='scripts/ripping/output' --exclude='*/__pycache__' \
   Cargo.toml Cargo.lock rust-toolchain.toml Dockerfile .dockerignore \
-  compose.yaml compose.storage.example.yaml .env.example README.md src web scripts tests .github
+  compose.yaml compose.storage.example.yaml .env.example README.md src web scripts tests docs .github
 scp /tmp/custom-plex-source.tar.gz PI_USER@PI_ADDRESS:custom-plex-source.tar.gz
 ssh PI_USER@PI_ADDRESS
 ```
