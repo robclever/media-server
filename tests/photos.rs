@@ -47,7 +47,8 @@ fn setup() -> (tempfile::TempDir, Router) {
 
 #[tokio::test]
 async fn home_storage_reports_media_capacity_without_double_counting_mounts() {
-    let (_tmp, app) = setup();
+    let (tmp, app) = setup();
+    std::fs::write(tmp.path().join("media/example.mp4"), vec![0_u8; 1234]).unwrap();
     let response = send(&app, "GET", "/api/storage", vec![], false).await;
     assert_eq!(response.status(), StatusCode::OK);
     let storage = json(response).await;
@@ -57,6 +58,20 @@ async fn home_storage_reports_media_capacity_without_double_counting_mounts() {
     let volumes = storage["volumes"].as_array().unwrap();
     assert!(!volumes.is_empty());
     assert!(volumes.len() <= 3);
+    let locations = storage["locations"].as_array().unwrap();
+    assert_eq!(locations.len(), 3);
+    let movies = locations
+        .iter()
+        .find(|location| location["name"] == "Movies: default")
+        .unwrap();
+    assert_eq!(movies["bytes"], 1234);
+    assert_eq!(
+        storage["managed"].as_u64().unwrap(),
+        locations
+            .iter()
+            .map(|location| location["bytes"].as_u64().unwrap())
+            .sum::<u64>()
+    );
 }
 #[tokio::test]
 async fn anonymous_albums_keep_originals_on_external_storage_and_survive_restart() {
@@ -310,6 +325,26 @@ async fn albums_and_photos_can_be_renamed_moved_and_deleted() {
         .status(),
         StatusCode::NO_CONTENT
     );
+    let too_long =
+        serde_json::to_vec(&serde_json::json!({"description": "x".repeat(2001)})).unwrap();
+    assert_eq!(
+        send(&app, "POST", "/api/albums/2/description", too_long, true,)
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        send(
+            &app,
+            "POST",
+            &format!("/api/photos/{id}/description"),
+            br#"{"description":"invalid\u0000description"}"#.to_vec(),
+            true,
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
     assert_eq!(
         send(
             &app,
@@ -365,6 +400,99 @@ async fn albums_and_photos_can_be_renamed_moved_and_deleted() {
             .status(),
         StatusCode::NOT_FOUND
     );
+}
+
+#[tokio::test]
+async fn album_and_photo_descriptions_survive_moves_and_restart() {
+    let (tmp, app) = setup();
+    for name in ["Family", "Archive"] {
+        send(
+            &app,
+            "POST",
+            "/api/albums",
+            format!(r#"{{"name":"{name}"}}"#).into_bytes(),
+            true,
+        )
+        .await;
+    }
+    let photo = json(
+        send(
+            &app,
+            "POST",
+            "/api/albums/1/photos?name=picnic.png",
+            picture(),
+            true,
+        )
+        .await,
+    )
+    .await;
+    let id = photo["id"].as_i64().unwrap();
+    assert_eq!(
+        send(
+            &app,
+            "POST",
+            "/api/albums/2/description",
+            br#"{"description":"Older family memories\nStored together."}"#.to_vec(),
+            true,
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        send(
+            &app,
+            "POST",
+            &format!("/api/photos/{id}/description"),
+            br#"{"description":"A picnic beside the lake."}"#.to_vec(),
+            true,
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    send(
+        &app,
+        "POST",
+        &format!("/api/photos/{id}/album"),
+        br#"{"album_id":2}"#.to_vec(),
+        true,
+    )
+    .await;
+
+    let reopened = router(
+        App::open(tmp.path().join("media"), tmp.path().join("data"), false)
+            .unwrap()
+            .with_photo_directory(tmp.path().join("external/photos"))
+            .unwrap(),
+    );
+    let albums = json(send(&reopened, "GET", "/api/albums", vec![], false).await).await;
+    let archive = albums
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|album| album["id"] == 2)
+        .unwrap();
+    assert_eq!(
+        archive["description"],
+        "Older family memories\nStored together."
+    );
+    let photos = json(send(&reopened, "GET", "/api/albums/2/photos", vec![], false).await).await;
+    assert_eq!(photos[0]["description"], "A picnic beside the lake.");
+    assert_eq!(
+        send(
+            &reopened,
+            "POST",
+            &format!("/api/photos/{id}/description"),
+            br#"{"description":"  "}"#.to_vec(),
+            true,
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let photos = json(send(&reopened, "GET", "/api/albums/2/photos", vec![], false).await).await;
+    assert_eq!(photos[0]["description"], "");
 }
 
 #[tokio::test]

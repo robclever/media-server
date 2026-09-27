@@ -19,6 +19,7 @@ parent = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
 
 def request(path, expected=200, data=None, authenticated=False, headers=None, method=None):
+    """Call the disposable server and assert the expected HTTP status."""
     values = {'Content-Type': 'application/json', 'X-Requested-With': 'custom-plex'}
     values.update(headers or {})
     req = urllib.request.Request(base + path, data=data if isinstance(data, bytes) else None if data is None else json.dumps(data).encode(), headers=values, method=method)
@@ -42,12 +43,15 @@ approval = f'/api/movies/{movie_id}/approval'
 request(media, 404)
 request(approval, 204, {'approved': True}, True)
 assert len(json.loads(request('/api/movies'))) == 1
+request(f'/api/movies/{movie_id}/progress', 204, {'position': 3, 'duration': 20})
+assert json.loads(request('/api/movies'))[0]['position'] == 3
 assert len(request(media, 206, headers={'Range': 'bytes=0-31'})) == 32
 request(media, 416, headers={'Range': 'bytes=999999999999-'})
 cover = f'/api/movies/{movie_id}/cover'
 generated = request(cover)
 assert generated.startswith(b'\xff\xd8'), 'FFmpeg did not produce a JPEG cover'
 def png_chunk(kind, value):
+    """Build one checksummed PNG chunk for the synthetic upload fixture."""
     return struct.pack('!I', len(value)) + kind + value + struct.pack('!I', zlib.crc32(kind + value))
 png = (b'\x89PNG\r\n\x1a\n' + png_chunk(b'IHDR', struct.pack('!2I5B', 1, 1, 8, 2, 0, 0, 0))
        + png_chunk(b'IDAT', zlib.compress(b'\x00\xff\x00\x00')) + png_chunk(b'IEND', b''))
@@ -61,22 +65,28 @@ album = json.loads(request('/api/albums', 201, {'name': 'Family photos'}))
 photo = json.loads(request(f"/api/albums/{album['id']}/photos?name=sample.png", 201, png, headers={'Content-Type': 'image/png'}))
 destination = json.loads(request('/api/albums', 201, {'name': 'Recent album'}))
 request(f"/api/photos/{photo['id']}/name", 204, {'name': 'Renamed photo'})
+request(f"/api/photos/{photo['id']}/description", 204, {'description': 'Container test photo'})
 request(f"/api/photos/{photo['id']}/album", 204, {'album_id': destination['id']})
 request(f"/api/albums/{destination['id']}/name", 204, {'name': 'Moved photos'})
+request(f"/api/albums/{destination['id']}/description", 204, {'description': 'Container test album'})
 request(f"/api/albums/{album['id']}", 204, method='DELETE')
 original_url = f"/api/photos/{photo['id']}/original"
 assert request(original_url) == png
 assert request(f"/api/photos/{photo['id']}/thumbnail").startswith(b'\xff\xd8')
 storage = json.loads(request('/api/storage'))
 assert storage['total'] > 0 and storage['available'] <= storage['total'] and storage['volumes']
+assert storage['managed'] >= 0 and storage['locations']
 
 subprocess.run(['docker', 'compose', 'up', '-d', '--no-build', '--pull', 'never', '--force-recreate', '--wait'], check=True)
 assert request(original_url) == png, 'Photo original did not persist'
 albums = json.loads(request('/api/albums'))
 assert any(a['id'] == destination['id'] and a['name'] == 'Moved photos' and a['count'] == 1 for a in albums), 'Album management did not persist'
+assert next(a for a in albums if a['id'] == destination['id'])['description'] == 'Container test album'
+assert json.loads(request(f"/api/albums/{destination['id']}/photos"))[0]['description'] == 'Container test photo'
 
 persisted = json.loads(request('/api/movies'))
 assert len(persisted) == 1, f'Approval did not persist: {persisted}'
+assert persisted[0]['position'] == 3, 'Playback progress did not persist'
 assert json.loads(request('/api/session', authenticated=True))['parent'], 'Session did not persist'
 # A persisted session alone cannot prove the password hash survived deployment.
 request('/api/logout', 204, {}, True)
@@ -94,4 +104,4 @@ request(original_url, 404)
 request(f"/api/albums/{destination['id']}", 204, method='DELETE')
 request('/api/logout', 204, {}, True)
 request('/api/scan', 401, {}, True)
-print('Container checks passed: login, movie rename, approval, streaming, seeking, covers, photo album management, storage usage, recreation, password persistence, deletion, revocation, logout.')
+print('Container checks passed: login, movie rename, approval, streaming, resume progress, seeking, covers, photo descriptions and album management, storage usage, recreation, password persistence, deletion, revocation, logout.')

@@ -20,8 +20,10 @@ use std::{
 };
 use tower_http::services::ServeFile;
 
+/// Maximum accepted photo upload body size.
 pub const MAX_UPLOAD: usize = 24 * 1024 * 1024;
 
+/// Returns a high-resolution timestamp used to order recently touched albums.
 fn recent() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -30,36 +32,51 @@ fn recent() -> i64 {
         .min(i64::MAX as u128) as i64
 }
 #[derive(Serialize)]
+/// Album summary returned to the album shelf.
 pub struct Album {
     id: i64,
     name: String,
     count: i64,
     cover_id: Option<i64>,
+    description: String,
 }
 #[derive(Serialize)]
+/// Photo metadata returned when an album is opened.
 pub struct Photo {
     id: i64,
     name: String,
+    description: String,
 }
 #[derive(Deserialize)]
+/// Request body for creating an album.
 pub struct NewAlbum {
     name: String,
 }
 #[derive(Deserialize)]
+/// Query string accompanying raw photo bytes.
 pub struct Upload {
     name: String,
 }
 
 #[derive(Deserialize)]
+/// Request body for renaming an album or photo.
 pub struct Rename {
     name: String,
 }
 
 #[derive(Deserialize)]
+/// Request body for moving a photo to another album.
 pub struct MovePhoto {
     album_id: i64,
 }
 
+#[derive(Deserialize)]
+/// Request body for album or photo description text.
+pub struct Description {
+    description: String,
+}
+
+/// Trims and validates a human-readable name.
 fn clean_name(value: &str, maximum: usize) -> ApiResult<&str> {
     let value = value.trim();
     if value.is_empty() || value.chars().count() > maximum || value.chars().any(char::is_control) {
@@ -69,9 +86,10 @@ fn clean_name(value: &str, maximum: usize) -> ApiResult<&str> {
     }
 }
 
+/// Lists albums by recent use with counts, covers, and descriptions.
 pub async fn albums(State(app): State<App>) -> ApiResult<Json<Vec<Album>>> {
     let db = app.db.lock().unwrap();
-    let mut stmt = db.prepare("SELECT a.id,a.name,COUNT(p.id),MIN(p.id) FROM albums a LEFT JOIN photos p ON p.album_id=a.id GROUP BY a.id ORDER BY a.updated_at DESC,a.id DESC").map_err(internal)?;
+    let mut stmt = db.prepare("SELECT a.id,a.name,COUNT(p.id),MIN(p.id),a.description FROM albums a LEFT JOIN photos p ON p.album_id=a.id GROUP BY a.id ORDER BY a.updated_at DESC,a.id DESC").map_err(internal)?;
     let rows = stmt
         .query_map([], |r| {
             Ok(Album {
@@ -79,11 +97,13 @@ pub async fn albums(State(app): State<App>) -> ApiResult<Json<Vec<Album>>> {
                 name: r.get(1)?,
                 count: r.get(2)?,
                 cover_id: r.get(3)?,
+                description: r.get(4)?,
             })
         })
         .map_err(internal)?;
     Ok(Json(rows.collect::<Result<Vec<_>, _>>().map_err(internal)?))
 }
+/// Creates an empty album without requiring a Parents session.
 pub async fn create(
     State(app): State<App>,
     Json(input): Json<NewAlbum>,
@@ -102,9 +122,11 @@ pub async fn create(
             name: name.into(),
             count: 0,
             cover_id: None,
+            description: String::new(),
         }),
     ))
 }
+/// Distinguishes a missing album from a valid empty album.
 fn exists(app: &App, id: i64) -> ApiResult<()> {
     let found: bool = app
         .db
@@ -122,6 +144,7 @@ fn exists(app: &App, id: i64) -> ApiResult<()> {
         Err(StatusCode::NOT_FOUND)
     }
 }
+/// Lists one album's photos and marks that album recently used.
 pub async fn list(State(app): State<App>, Path(id): Path<i64>) -> ApiResult<Json<Vec<Photo>>> {
     exists(&app, id)?;
     let db = app.db.lock().unwrap();
@@ -131,18 +154,20 @@ pub async fn list(State(app): State<App>, Path(id): Path<i64>) -> ApiResult<Json
     )
     .map_err(internal)?;
     let mut stmt = db
-        .prepare("SELECT id,name FROM photos WHERE album_id=?1 ORDER BY id")
+        .prepare("SELECT id,name,description FROM photos WHERE album_id=?1 ORDER BY id")
         .map_err(internal)?;
     let rows = stmt
         .query_map([id], |r| {
             Ok(Photo {
                 id: r.get(0)?,
                 name: r.get(1)?,
+                description: r.get(2)?,
             })
         })
         .map_err(internal)?;
     Ok(Json(rows.collect::<Result<Vec<_>, _>>().map_err(internal)?))
 }
+/// Validates an uploaded image, applies orientation, and builds browsing JPEGs.
 fn prepare(bytes: &[u8]) -> anyhow::Result<(&'static str, Vec<u8>, Vec<u8>)> {
     let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
     let extension = match reader.format() {
@@ -174,6 +199,10 @@ fn prepare(bytes: &[u8]) -> anyhow::Result<(&'static str, Vec<u8>, Vec<u8>)> {
     )?;
     Ok((extension, preview, thumb))
 }
+/// Stores an original photo plus preview and thumbnail variants.
+///
+/// Files are written to a staging directory and atomically renamed before the
+/// database transaction commits, preventing partially visible uploads.
 pub async fn upload(
     State(app): State<App>,
     Path(id): Path<i64>,
@@ -232,12 +261,20 @@ pub async fn upload(
         }
         let photo_id = tx.last_insert_rowid();
         tx.commit().map_err(internal)?;
-        Ok((StatusCode::CREATED, Json(Photo { id: photo_id, name })))
+        Ok((
+            StatusCode::CREATED,
+            Json(Photo {
+                id: photo_id,
+                name,
+                description: String::new(),
+            }),
+        ))
     })
     .await
     .map_err(internal)?
 }
 
+/// Changes an album's display name and marks it recently used.
 pub async fn rename_album(
     State(app): State<App>,
     Path(id): Path<i64>,
@@ -260,6 +297,7 @@ pub async fn rename_album(
     }
 }
 
+/// Changes a photo's display name without renaming its stored files.
 pub async fn rename_photo(
     State(app): State<App>,
     Path(id): Path<i64>,
@@ -279,6 +317,63 @@ pub async fn rename_photo(
     }
 }
 
+/// Trims a description and enforces its 2,000-character storage contract.
+fn clean_description(value: &str) -> ApiResult<&str> {
+    let value = value.trim();
+    if value.chars().count() > 2000 || value.chars().any(|character| character == '\0') {
+        Err(StatusCode::BAD_REQUEST)
+    } else {
+        Ok(value)
+    }
+}
+
+/// Replaces or clears an album description.
+pub async fn describe_album(
+    State(app): State<App>,
+    Path(id): Path<i64>,
+    Json(input): Json<Description>,
+) -> ApiResult<StatusCode> {
+    let description = clean_description(&input.description)?;
+    let changed = app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE albums SET description=?1,updated_at=?2 WHERE id=?3",
+            params![description, recent(), id],
+        )
+        .map_err(internal)?;
+    if changed == 0 {
+        Err(StatusCode::NOT_FOUND)
+    } else {
+        Ok(StatusCode::NO_CONTENT)
+    }
+}
+
+/// Replaces or clears an individual photo description.
+pub async fn describe_photo(
+    State(app): State<App>,
+    Path(id): Path<i64>,
+    Json(input): Json<Description>,
+) -> ApiResult<StatusCode> {
+    let description = clean_description(&input.description)?;
+    let changed = app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE photos SET description=?1 WHERE id=?2",
+            params![description, id],
+        )
+        .map_err(internal)?;
+    if changed == 0 {
+        Err(StatusCode::NOT_FOUND)
+    } else {
+        Ok(StatusCode::NO_CONTENT)
+    }
+}
+
+/// Reassigns a photo to an existing album and updates recent ordering.
 pub async fn move_photo(
     State(app): State<App>,
     Path(id): Path<i64>,
@@ -314,6 +409,7 @@ pub async fn move_photo(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Resolves a random storage token while preventing traversal and symlink escape.
 fn stored_directory(root: &std::path::Path, storage: &str) -> ApiResult<PathBuf> {
     if storage.len() != 32 || !storage.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
@@ -325,6 +421,7 @@ fn stored_directory(root: &std::path::Path, storage: &str) -> ApiResult<PathBuf>
     Ok(path)
 }
 
+/// Produces a hidden random path used for reversible deletion staging.
 fn tombstone(root: &std::path::Path) -> PathBuf {
     let mut random = [0u8; 16];
     OsRng.fill_bytes(&mut random);
@@ -337,6 +434,10 @@ fn tombstone(root: &std::path::Path) -> PathBuf {
     ))
 }
 
+/// Permanently deletes one photo's files and metadata.
+///
+/// The directory is first moved to a tombstone and restored if the database
+/// deletion fails.
 pub async fn delete_photo(State(app): State<App>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     tokio::task::spawn_blocking(move || {
         let root = app.photos.canonicalize().map_err(internal)?;
@@ -367,6 +468,7 @@ pub async fn delete_photo(State(app): State<App>, Path(id): Path<i64>) -> ApiRes
     .map_err(internal)?
 }
 
+/// Permanently deletes an album and every photo variant it owns.
 pub async fn delete_album(State(app): State<App>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     tokio::task::spawn_blocking(move || {
         let root = app.photos.canonicalize().map_err(internal)?;
@@ -432,6 +534,7 @@ pub async fn delete_album(State(app): State<App>, Path(id): Path<i64>) -> ApiRes
     .await
     .map_err(internal)?
 }
+/// Serves an original, preview, or thumbnail after containing the resolved path.
 pub async fn file(
     State(app): State<App>,
     Path((id, variant)): Path<(i64, String)>,
@@ -477,9 +580,10 @@ pub async fn file(
     Ok(response)
 }
 
+/// Creates or migrates photo metadata tables and returns the default file root.
 pub fn initialize(db: &rusqlite::Connection, data: &std::path::Path) -> anyhow::Result<PathBuf> {
-    db.execute_batch("CREATE TABLE IF NOT EXISTS albums (id INTEGER PRIMARY KEY, name TEXT NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY, album_id INTEGER NOT NULL REFERENCES albums(id), name TEXT NOT NULL, storage TEXT NOT NULL UNIQUE, extension TEXT NOT NULL);
+    db.execute_batch("CREATE TABLE IF NOT EXISTS albums (id INTEGER PRIMARY KEY, name TEXT NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY, album_id INTEGER NOT NULL REFERENCES albums(id), name TEXT NOT NULL, storage TEXT NOT NULL UNIQUE, extension TEXT NOT NULL, description TEXT NOT NULL DEFAULT '');
         CREATE INDEX IF NOT EXISTS photos_album ON photos(album_id);")?;
     let has_updated_at = db
         .prepare("PRAGMA table_info(albums)")?
@@ -493,17 +597,35 @@ pub fn initialize(db: &rusqlite::Connection, data: &std::path::Path) -> anyhow::
             [],
         )?;
     }
+    for (table, column) in [("albums", "description"), ("photos", "description")] {
+        let columns = db
+            .prepare(&format!("PRAGMA table_info({table})"))?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !columns.iter().any(|name| name == column) {
+            db.execute(
+                &format!("ALTER TABLE {table} ADD COLUMN description TEXT NOT NULL DEFAULT ''"),
+                [],
+            )?;
+        }
+    }
     let photos = data.join("photo-albums");
     std::fs::create_dir_all(&photos)?;
     Ok(photos)
 }
 impl App {
+    /// Replaces the default photo directory with a writable external location.
+    ///
+    /// The directory is created when missing and canonicalized before use. This
+    /// is how Docker deployments keep large photo files on external storage
+    /// while retaining SQLite metadata in the application data directory.
     pub fn with_photo_directory(mut self, path: PathBuf) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&path)?;
         self.photos = path.canonicalize()?;
         Ok(self)
     }
 }
+/// Returns the photo web asset and album/photo API routes.
 pub fn routes() -> axum::Router<App> {
     use axum::{Router, routing::get};
     Router::new()
@@ -520,6 +642,10 @@ pub fn routes() -> axum::Router<App> {
         .route("/api/albums/{id}", axum::routing::delete(delete_album))
         .route("/api/albums/{id}/name", axum::routing::post(rename_album))
         .route(
+            "/api/albums/{id}/description",
+            axum::routing::post(describe_album),
+        )
+        .route(
             "/api/albums/{id}/photos",
             get(list)
                 .post(upload)
@@ -527,6 +653,10 @@ pub fn routes() -> axum::Router<App> {
         )
         .route("/api/photos/{id}", axum::routing::delete(delete_photo))
         .route("/api/photos/{id}/name", axum::routing::post(rename_photo))
+        .route(
+            "/api/photos/{id}/description",
+            axum::routing::post(describe_photo),
+        )
         .route("/api/photos/{id}/album", axum::routing::post(move_photo))
         .route("/api/photos/{id}/{variant}", get(file))
 }

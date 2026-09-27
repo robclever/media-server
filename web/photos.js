@@ -1,4 +1,10 @@
 'use strict';
+/**
+ * Photo Album controller.
+ *
+ * Album state is enclosed in this IIFE while shared navigation, API, and dialog
+ * helpers come from app.js. Photo operations intentionally remain password-free.
+ */
 (() => {
   let currentAlbum = null;
   let photos = [];
@@ -7,14 +13,17 @@
   let busy = false;
   let revision = 0;
 
+  /** Persists the most recently used album for destination-menu ordering. */
   function rememberAlbum(id) {
     try { localStorage.setItem('photo-last-album', String(id)); } catch (_) {}
   }
 
+  /** Returns the last-used album ID, tolerating disabled browser storage. */
   function lastAlbum() {
     try { return Number(localStorage.getItem('photo-last-album')) || 0; } catch (_) { return 0; }
   }
 
+  /** Prompts for and persists a new album display name. */
   async function renameAlbum(album) {
     const name = await askName('Rename album', album.name);
     if (name === null || name.trim() === album.name) return;
@@ -24,6 +33,17 @@
     $('status').textContent = `Album renamed to ${album.name}.`;
   }
 
+  /** Prompts for and persists album-level descriptive text. */
+  async function describeAlbum(album) {
+    const description = await askDescription(`Describe ${album.name}`, album.description);
+    if (description === null || description.trim() === album.description) return;
+    await api(`/api/albums/${album.id}/description`, {description});
+    album.description = description.trim();
+    await loadAlbums();
+    $('status').textContent = `Description saved for ${album.name}.`;
+  }
+
+  /** Confirms and permanently deletes an album and its photos. */
   async function deleteAlbum(album) {
     const contents = album.count === 1 ? '1 photo' : `${album.count} photos`;
     if (!await askDelete(`Delete “${album.name}” and ${contents}? This permanently removes the original photos and cannot be undone.`)) return;
@@ -32,6 +52,7 @@
     $('status').textContent = `Deleted ${album.name}.`;
   }
 
+  /** Loads and renders the album shelf, discarding stale overlapping responses. */
   async function loadAlbums() {
     const version = ++revision;
     show('albums');
@@ -49,26 +70,32 @@
       }
       const title = document.createElement('h2'); title.textContent = album.name;
       const count = document.createElement('p'); count.textContent = `${album.count} photo${album.count === 1 ? '' : 's'}`;
-      open.append(title, count); open.onclick = () => openAlbum(album).catch(report);
+      open.append(title, count);
+      if (album.description) { const description = document.createElement('p'); description.className = 'description album-summary'; description.textContent = album.description; open.append(description); }
+      open.onclick = () => openAlbum(album).catch(report);
       const actions = document.createElement('div'); actions.className = 'icon-actions compact';
-      const rename = document.createElement('button'); rename.title = 'Rename album'; rename.setAttribute('aria-label', `Rename ${album.name}`); rename.innerHTML = '✎<span>Rename</span>';
+      const rename = document.createElement('button'); rename.className = 'icon-button'; rename.dataset.tooltip = 'Rename album'; rename.setAttribute('aria-label', `Rename ${album.name}`); rename.textContent = '✎';
       rename.onclick = () => renameAlbum(album).catch(report);
-      const remove = document.createElement('button'); remove.className = 'danger'; remove.title = 'Delete album'; remove.setAttribute('aria-label', `Delete ${album.name}`); remove.innerHTML = '🗑<span>Delete</span>';
+      const describe = document.createElement('button'); describe.className = 'icon-button'; describe.dataset.tooltip = 'Edit description'; describe.setAttribute('aria-label', `Edit description for ${album.name}`); describe.textContent = '☰';
+      describe.onclick = () => describeAlbum(album).catch(report);
+      const remove = document.createElement('button'); remove.className = 'icon-button danger'; remove.dataset.tooltip = 'Delete album'; remove.setAttribute('aria-label', `Delete ${album.name}`); remove.textContent = '🗑';
       remove.onclick = () => deleteAlbum(album).catch(report);
-      actions.append(rename, remove); card.append(open, actions); $('album-list').append(card);
+      actions.append(rename, describe, remove); card.append(open, actions); $('album-list').append(card);
     }
   }
 
+  /** Opens an album and loads its photo metadata. */
   async function openAlbum(album) {
     const version = ++revision;
     currentAlbum = album; photos = []; rememberAlbum(album.id);
-    $('album-title').textContent = album.name; $('photo-list').replaceChildren();
+    $('album-title').textContent = album.name; $('album-description').textContent = album.description || ''; $('photo-list').replaceChildren();
     $('photo-files').value = ''; $('upload-progress').textContent = ''; show('album-detail');
     const result = await api(`/api/albums/${album.id}/photos`);
     if (version !== revision || $('album-detail').hidden) return;
     photos = result; renderPhotos();
   }
 
+  /** Rebuilds photo tiles from the active album's in-memory collection. */
   function renderPhotos() {
     $('photo-list').replaceChildren(); $('no-photos').hidden = photos.length > 0;
     photos.forEach((photo, index) => {
@@ -80,16 +107,18 @@
     });
   }
 
+  /** Populates the preview dialog for the selected photo. */
   function displayPhoto() {
     const photo = photos[selected];
     if (!photo) { $('photo-viewer').close(); return; }
-    $('photo-title').textContent = photo.name; $('full-photo').alt = photo.name;
+    $('photo-title').textContent = photo.name; $('photo-description-input').value = photo.description || ''; $('photo-description-status').textContent = 'Up to 2,000 characters.'; $('full-photo').alt = photo.name;
     $('full-photo').src = `/api/photos/${photo.id}/preview`;
     $('download-photo').href = `/api/photos/${photo.id}/original`;
     $('download-photo').download = photo.name;
     $('previous-photo').disabled = selected === 0; $('next-photo').disabled = selected === photos.length - 1;
   }
 
+  /** Renames the selected photo while retaining its stored files. */
   async function renamePhoto() {
     const photo = photos[selected];
     $('photo-viewer').close();
@@ -101,6 +130,21 @@
     $('photo-viewer').showModal();
   }
 
+  /** Saves or clears the selected photo's always-visible description field. */
+  async function savePhotoDescription() {
+    const photo = photos[selected];
+    const description = $('photo-description-input').value;
+    if (description.trim() === photo.description) { $('photo-description-status').textContent = 'Description is already saved.'; return; }
+    $('save-photo-description').disabled = true;
+    try {
+      await api(`/api/photos/${photo.id}/description`, {description});
+      photo.description = description.trim(); renderPhotos();
+      $('photo-description-input').value = photo.description;
+      $('photo-description-status').textContent = 'Description saved.';
+    } finally { $('save-photo-description').disabled = false; }
+  }
+
+  /** Loads eligible destination albums and opens the move menu. */
   async function openMoveMenu() {
     const photo = photos[selected];
     const albums = await api('/api/albums');
@@ -125,6 +169,7 @@
     $('photo-viewer').close(); $('move-dialog').showModal();
   }
 
+  /** Confirms and permanently deletes the selected photo and generated variants. */
   async function deletePhoto() {
     const photo = photos[selected];
     $('photo-viewer').close();
@@ -171,6 +216,7 @@
   $('previous-photo').onclick = () => { if (selected > 0) { selected--; displayPhoto(); } };
   $('next-photo').onclick = () => { if (selected + 1 < photos.length) { selected++; displayPhoto(); } };
   $('rename-photo').onclick = () => renamePhoto().catch(report);
+  $('save-photo-description').onclick = () => savePhotoDescription().catch(report);
   $('move-photo').onclick = () => openMoveMenu().catch(report);
   $('delete-photo').onclick = () => deletePhoto().catch(report);
   $('cancel-move').onclick = () => { $('move-dialog').close(); if (photos[selected]) { displayPhoto(); $('photo-viewer').showModal(); } };

@@ -9,7 +9,18 @@ import tempfile
 import uuid
 
 
+def source_archive_filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+    """Exclude generated and local media files from the Pi source archive."""
+    parts = Path(info.name).parts
+    if '__pycache__' in parts or info.name.endswith('.pyc') or info.name.endswith('.DS_Store'):
+        return None
+    if parts[:3] == ('scripts', 'ripping', 'output'):
+        return None
+    return info
+
+
 def main():
+    """Build an ARM64 image and hand an atomic update to the remote helper."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', default='rob@192.168.0.73')
     parser.add_argument('--key', type=Path, default=Path.home() / '.ssh/custom_plex_pi')
@@ -22,6 +33,7 @@ def main():
     ssh = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-i', str(args.key), args.host]
 
     def remote(command, **kwargs):
+        """Run one shell-quoted command through the configured noninteractive SSH connection."""
         return subprocess.run(ssh + [shlex.join(command)], check=True, **kwargs)
 
     remote(['bash', '-c', 'test -f "$1/.env" && sudo -n docker info >/dev/null && test "$(uname -m)" = aarch64', 'deploy', args.directory])
@@ -31,8 +43,8 @@ def main():
         with tempfile.TemporaryDirectory(prefix='custom-plex-deploy-') as temporary:
             source = Path(temporary) / 'source.tar.gz'
             with tarfile.open(source, 'w:gz') as archive:
-                for name in ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'Dockerfile', '.dockerignore', 'compose.yaml', 'compose.storage.example.yaml', '.env.example', 'README.md', 'src', 'web', 'scripts', 'tests', '.github']:
-                    archive.add(root / name, arcname=name, filter=lambda info: None if '__pycache__' in info.name else info)
+                for name in ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'Dockerfile', '.dockerignore', 'compose.yaml', 'compose.storage.example.yaml', '.env.example', 'README.md', 'src', 'web', 'scripts', 'tests', 'docs', '.github']:
+                    archive.add(root / name, arcname=name, filter=source_archive_filter)
             image = Path(temporary) / 'image.tar'
             subprocess.run(['docker', 'save', '-o', str(image), release], check=True)
             # Stream through SSH so paths never depend on scp's remote-shell parsing.

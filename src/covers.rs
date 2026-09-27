@@ -15,9 +15,12 @@ use std::{
 };
 use tokio::io::AsyncReadExt;
 
+/// Maximum accepted custom-cover request body size.
 pub const MAX_UPLOAD: usize = 8 * 1024 * 1024;
 const UPLOADED: &str = "uploaded";
 
+/// Resolves a movie to its canonical media root and candidate path after
+/// applying the same visibility rule used by streaming.
 fn location(app: &App, id: i64, headers: &HeaderMap) -> ApiResult<(PathBuf, PathBuf)> {
     let parent = app.parent(headers);
     let (source, relative): (String, String) = app
@@ -34,6 +37,7 @@ fn location(app: &App, id: i64, headers: &HeaderMap) -> ApiResult<(PathBuf, Path
     Ok((root.clone(), root.join(relative)))
 }
 
+/// Reads the cached fingerprint and normalized JPEG for a movie.
 fn cached(app: &App, id: i64) -> ApiResult<Option<(String, Vec<u8>)>> {
     app.db
         .lock()
@@ -46,14 +50,18 @@ fn cached(app: &App, id: i64) -> ApiResult<Option<(String, Vec<u8>)>> {
         .optional()
         .map_err(internal)
 }
+/// Atomically inserts or replaces one movie's cached cover.
 fn save(app: &App, id: i64, fingerprint: &str, bytes: &[u8]) -> ApiResult<()> {
     app.db.lock().unwrap().execute("INSERT INTO covers VALUES(?1,?2,?3) ON CONFLICT(movie_id) DO UPDATE SET fingerprint=excluded.fingerprint,jpeg=excluded.jpeg",params![id,fingerprint,bytes]).map_err(internal)?;
     Ok(())
 }
+/// Creates a JPEG HTTP response from normalized cover bytes.
 fn response(bytes: Vec<u8>) -> Response {
     ([(header::CONTENT_TYPE, "image/jpeg")], bytes).into_response()
 }
 
+/// Decodes an allowed input format within resource limits and produces the
+/// bounded JPEG representation stored by the server.
 fn normalize(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
     let mut limits = Limits::default();
@@ -67,6 +75,10 @@ fn normalize(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     Ok(jpeg)
 }
 
+/// Accepts a custom cover for a movie visible to the caller.
+///
+/// Visibility is checked before and after image decoding so an approval revoked
+/// during expensive work cannot be used to save a cover.
 pub async fn upload(
     State(app): State<App>,
     Path(id): Path<i64>,
@@ -85,6 +97,7 @@ pub async fn upload(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Removes a stored cover and forces automatic selection on the next request.
 pub async fn reset(
     State(app): State<App>,
     Path(id): Path<i64>,
@@ -101,6 +114,7 @@ pub async fn reset(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Builds a cache key from a file's path, length, and modification time.
 async fn fingerprint(path: &FsPath) -> ApiResult<String> {
     let meta = tokio::fs::metadata(path)
         .await
@@ -114,6 +128,7 @@ async fn fingerprint(path: &FsPath) -> ApiResult<String> {
     Ok(format!("{}:{}:{modified}", path.display(), meta.len()))
 }
 
+/// Reads and normalizes a sidecar image without accepting an oversized file.
 async fn read_image(path: &FsPath) -> anyhow::Result<Vec<u8>> {
     let file = tokio::fs::File::open(path).await?;
     let mut bytes = Vec::new();
@@ -124,6 +139,8 @@ async fn read_image(path: &FsPath) -> anyhow::Result<Vec<u8>> {
     tokio::task::spawn_blocking(move || normalize(&bytes)).await?
 }
 
+/// Extracts one JPEG frame with FFmpeg, retrying at the beginning for short
+/// clips and bounding process time and memory.
 async fn frame(path: &FsPath) -> Option<Vec<u8>> {
     // Short clips may have no frame at 10 seconds; retry at the start.
     for position in ["10", "0"] {
@@ -174,6 +191,10 @@ async fn frame(path: &FsPath) -> Option<Vec<u8>> {
     None
 }
 
+/// Returns the selected cover for a movie visible to the caller.
+///
+/// Uploaded art wins, followed by same-stem sidecar artwork and an extracted
+/// frame. Successful results and extraction failures are cached.
 pub async fn get(
     State(app): State<App>,
     Path(id): Path<i64>,

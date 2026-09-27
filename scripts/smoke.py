@@ -7,6 +7,7 @@ import urllib.request
 base = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8080"
 
 def request(path, expected=200, body=None):
+    """Call one smoke-test endpoint and assert its status."""
     req = urllib.request.Request(base + path, data=body, headers={"X-Requested-With": "custom-plex", "Content-Type": "application/json"})
     try:
         response = urllib.request.urlopen(req, timeout=10)
