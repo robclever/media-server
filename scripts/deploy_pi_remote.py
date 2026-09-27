@@ -8,6 +8,7 @@ import sys
 
 
 def run(*command, **kwargs):
+    """Run a required remote command and raise immediately on failure."""
     return subprocess.run(command, check=True, **kwargs)
 
 
@@ -28,6 +29,7 @@ def photo_storage(compose):
 
 
 def main():
+    """Back up, install, health-check, and if necessary roll back one release."""
     directory, staging, release = sys.argv[1:]
     os.chdir(directory)
     compose = ['sudo', '-n', 'docker', 'compose']

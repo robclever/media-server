@@ -19,6 +19,7 @@ parent = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
 
 def request(path, expected=200, data=None, authenticated=False, headers=None, method=None):
+    """Call the disposable server and assert the expected HTTP status."""
     values = {'Content-Type': 'application/json', 'X-Requested-With': 'custom-plex'}
     values.update(headers or {})
     req = urllib.request.Request(base + path, data=data if isinstance(data, bytes) else None if data is None else json.dumps(data).encode(), headers=values, method=method)
@@ -50,6 +51,7 @@ cover = f'/api/movies/{movie_id}/cover'
 generated = request(cover)
 assert generated.startswith(b'\xff\xd8'), 'FFmpeg did not produce a JPEG cover'
 def png_chunk(kind, value):
+    """Build one checksummed PNG chunk for the synthetic upload fixture."""
     return struct.pack('!I', len(value)) + kind + value + struct.pack('!I', zlib.crc32(kind + value))
 png = (b'\x89PNG\r\n\x1a\n' + png_chunk(b'IHDR', struct.pack('!2I5B', 1, 1, 8, 2, 0, 0, 0))
        + png_chunk(b'IDAT', zlib.compress(b'\x00\xff\x00\x00')) + png_chunk(b'IEND', b''))

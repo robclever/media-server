@@ -48,6 +48,7 @@ try:
     server = subprocess.Popen([str(binary)], cwd=root, env=environment)
 
     def stop(_signal, _frame):
+        """Forward Playwright's shutdown signal to the disposable Rust server."""
         if server.poll() is None:
             server.terminate()
 

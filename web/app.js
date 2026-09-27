@@ -1,10 +1,19 @@
 'use strict';
+/**
+ * Shared browser controller for profiles, authentication, movies, covers,
+ * playback progress, storage reporting, and reusable dialogs.
+ *
+ * This file loads before photos.js. The photo controller intentionally reuses
+ * `$`, `api`, `show`, `askName`, `askDescription`, `askDelete`, and
+ * `leaveParents` from this script.
+ */
 const $ = id => document.getElementById(id);
 let parent = false;
 let collection = [];
 let returnFocus;
 let currentMovie = null;
 let lastSavedAt = 0;
+/** Sends a same-origin API request and converts known status codes to useful UI errors. */
 async function api(path, data, method) {
   const response = await fetch(path, {method: method || (data === undefined ? 'GET' : 'POST'), headers: {'Content-Type': 'application/json', 'X-Requested-With': 'custom-plex'}, body: data === undefined ? undefined : JSON.stringify(data)});
   if (!response.ok) {
@@ -15,15 +24,19 @@ async function api(path, data, method) {
   }
   return response.status === 204 ? null : response.json();
 }
+/** Announces an operation failure in the page-level live region. */
 function report(error) { $('status').textContent = error.message; }
+/** Shows one primary screen, hides the others, and clears stale status text. */
 function show(id) { for (const section of ['profiles','login','library','albums','album-detail']) $(section).hidden = section !== id; $('status').textContent = ''; }
 let editResolution;
+/** Opens the reusable single-line editor and resolves with text or null. */
 function askName(heading, value) {
   return new Promise(resolve => {
     editResolution = resolve; $('edit-heading').textContent = heading; $('edit-name').value = value;
     $('edit-dialog').showModal(); $('edit-name').select();
   });
 }
+/** Closes and resolves the active name editor. */
 function finishEdit(value) {
   const resolve = editResolution; editResolution = null; $('edit-dialog').close(); resolve?.(value);
 }
@@ -31,12 +44,14 @@ $('edit-form').onsubmit = event => { event.preventDefault(); finishEdit($('edit-
 $('cancel-edit').onclick = () => finishEdit(null);
 $('edit-dialog').addEventListener('cancel', event => { event.preventDefault(); finishEdit(null); });
 let descriptionResolution;
+/** Opens the reusable multiline album-description editor. */
 function askDescription(heading, value) {
   return new Promise(resolve => {
     descriptionResolution = resolve; $('description-heading').textContent = heading; $('description-text').value = value || '';
     $('description-dialog').showModal(); $('description-text').focus();
   });
 }
+/** Closes and resolves the active description editor. */
 function finishDescription(value) {
   const resolve = descriptionResolution; descriptionResolution = null; $('description-dialog').close(); resolve?.(value);
 }
@@ -44,24 +59,28 @@ $('description-form').onsubmit = event => { event.preventDefault(); finishDescri
 $('cancel-description').onclick = () => finishDescription(null);
 $('description-dialog').addEventListener('cancel', event => { event.preventDefault(); finishDescription(null); });
 let confirmResolution;
+/** Opens the destructive-action confirmation dialog. */
 function askDelete(message) {
   return new Promise(resolve => {
     confirmResolution = resolve; $('confirm-message').textContent = message;
     $('confirm-dialog').showModal(); $('cancel-confirm').focus();
   });
 }
+/** Closes and resolves the active deletion confirmation. */
 function finishConfirm(value) {
   const resolve = confirmResolution; confirmResolution = null; $('confirm-dialog').close(); resolve?.(value);
 }
 $('cancel-confirm').onclick = () => finishConfirm(false);
 $('accept-confirm').onclick = () => finishConfirm(true);
 $('confirm-dialog').addEventListener('cancel', event => { event.preventDefault(); finishConfirm(false); });
+/** Formats a nonnegative byte count for the storage meter. */
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return 'Unavailable';
   const units = ['B','KiB','MiB','GiB','TiB']; let unit = 0;
   while (bytes >= 1024 && unit < units.length - 1) { bytes /= 1024; unit++; }
   return `${bytes.toFixed(unit < 2 ? 0 : 1)} ${units[unit]}`;
 }
+/** Loads aggregate filesystem capacity without blocking the rest of the home screen. */
 async function loadStorage() {
   try {
     const storage = await api('/api/storage');
@@ -74,12 +93,14 @@ async function loadStorage() {
     $('storage').replaceChildren(heading, meter, summary, details);
   } catch (_) { $('storage').replaceChildren(Object.assign(document.createElement('p'), {textContent:'Storage usage is unavailable.'})); }
 }
+/** Loads the movie list for the selected profile and opens the library screen. */
 async function load() {
   collection = await api('/api/movies');
   $('profile-label').textContent = parent ? 'PARENTS · THE FULL COLLECTION' : 'BABY · LITTLE FAVORITES';
   $('scan').hidden = !parent;
   show('library'); render(); $('search').focus();
 }
+/** Rebuilds filtered movie cards and binds their profile-dependent actions. */
 function render() {
   const movies = collection.filter(movie => movie.title.toLowerCase().includes($('search').value.toLowerCase()));
   $('movies').replaceChildren(); $('empty').hidden = movies.length > 0;
@@ -162,10 +183,16 @@ function render() {
     $('movies').append(card);
   }
 }
+/** Formats a playback position as M:SS or H:MM:SS. */
 function formatTime(seconds) {
   const total = Math.max(0, Math.floor(seconds)); const hours = Math.floor(total / 3600); const minutes = Math.floor(total % 3600 / 60); const rest = total % 60;
   return hours ? `${hours}:${String(minutes).padStart(2,'0')}:${String(rest).padStart(2,'0')}` : `${minutes}:${String(rest).padStart(2,'0')}`;
 }
+/**
+ * Saves the active video's shared position.
+ * Routine timeupdate events are throttled to ten-second movement; pause, close,
+ * end, and background events force a save.
+ */
 async function saveProgress(force = false) {
   const video = $('video'); const movie = currentMovie;
   if (!movie || !Number.isFinite(video.duration) || video.duration <= 0 || !Number.isFinite(video.currentTime)) return;
@@ -174,6 +201,7 @@ async function saveProgress(force = false) {
   try { await api(`/api/movies/${movie.id}/progress`, {position: video.ended ? 0 : video.currentTime, duration: video.duration}); if (video.ended) movie.position = null; }
   catch (error) { if (force) report(error); }
 }
+/** Logs out Parents and clears profile-specific movie state from the page. */
 async function leaveParents() { await api('/api/logout', {}); parent = false; collection = []; $('movies').replaceChildren(); $('search').value = ''; }
 $('baby').onclick = async () => { try { await leaveParents(); await load(); } catch(error) { report(error); } };
 $('parents').onclick = async () => { try { const session = await api('/api/session'); if (session.parent) { parent = true; await load(); } else { show('login'); $('password').focus(); } } catch(error) { report(error); } };

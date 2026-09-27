@@ -10,6 +10,7 @@ import uuid
 
 
 def main():
+    """Build an ARM64 image and hand an atomic update to the remote helper."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', default='rob@192.168.0.73')
     parser.add_argument('--key', type=Path, default=Path.home() / '.ssh/custom_plex_pi')
@@ -22,6 +23,7 @@ def main():
     ssh = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-i', str(args.key), args.host]
 
     def remote(command, **kwargs):
+        """Run one shell-quoted command through the configured noninteractive SSH connection."""
         return subprocess.run(ssh + [shlex.join(command)], check=True, **kwargs)
 
     remote(['bash', '-c', 'test -f "$1/.env" && sudo -n docker info >/dev/null && test "$(uname -m)" = aarch64', 'deploy', args.directory])

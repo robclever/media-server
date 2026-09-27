@@ -1,3 +1,10 @@
+//! Shared movie playback progress.
+//!
+//! Progress is attached to a movie rather than a browser or profile, allowing a
+//! household to resume on another device. A request must be able to see the
+//! movie: Parents may update any present movie and anonymous users may update
+//! only Baby-approved movies.
+
 use crate::{ApiResult, App, internal, now};
 use axum::{
     Json, Router,
@@ -9,11 +16,13 @@ use rusqlite::params;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
+/// Browser-reported playback state in seconds.
 pub struct Progress {
     position: f64,
     duration: f64,
 }
 
+/// Creates the additive playback-progress schema.
 pub fn initialize(db: &rusqlite::Connection) -> anyhow::Result<()> {
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS playback_progress (
@@ -26,6 +35,10 @@ pub fn initialize(db: &rusqlite::Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validates and saves progress for a movie visible to the caller.
+///
+/// Opening seconds and the final fifteen seconds clear progress so completed
+/// movies naturally start from the beginning next time.
 async fn save(
     State(app): State<App>,
     Path(id): Path<i64>,
@@ -67,6 +80,7 @@ async fn save(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Returns routes for saving per-movie playback progress.
 pub fn routes() -> Router<App> {
     Router::new().route("/api/movies/{id}/progress", post(save))
 }

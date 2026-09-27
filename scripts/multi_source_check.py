@@ -26,6 +26,7 @@ with tempfile.TemporaryDirectory(prefix="cinema-sources-") as temporary:
     compose = ["docker", "compose", "-f", str(repo / "compose.yaml"), "-f", str(repo / "compose.storage.example.yaml")]
 
     def docker(*args, **kwargs):
+        """Run Compose inside the isolated project and mount configuration."""
         return subprocess.run(compose + list(args), env=env, check=True, **kwargs)
 
     jar = http.cookiejar.CookieJar()
@@ -33,6 +34,7 @@ with tempfile.TemporaryDirectory(prefix="cinema-sources-") as temporary:
     base = "http://127.0.0.1:" + env["PORT"]
 
     def request(path, expected=200, data=None, authenticated=False):
+        """Call the isolated multi-source server and assert its status."""
         req = urllib.request.Request(base + path, data=None if data is None else json.dumps(data).encode(),
                                      headers={"Content-Type": "application/json", "X-Requested-With": "custom-plex"})
         try:

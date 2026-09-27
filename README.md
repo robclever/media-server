@@ -4,6 +4,15 @@ A Rust media server for a home DVD library, with a TV-friendly web interface, an
 
 This is a standalone Plex-like application. It does not use official Plex clients or Plex accounts.
 
+## Project documentation
+
+- [Architecture](docs/ARCHITECTURE.md): runtime components, request flow, persistence, filesystems, authentication, and deployment design.
+- [HTTP API](docs/API.md): routes, access rules, payloads, responses, and status codes.
+- [Development guide](docs/DEVELOPMENT.md): repository map, documentation conventions, verification, and feature-development checklists.
+- Rust API documentation: run `RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --document-private-items`, then open `target/doc/custom_plex/index.html`.
+
+Rustdoc is the primary code-reference tool for this project. It understands Rust modules and types directly and is checked by CI. Doxygen is not required.
+
 ## Start here for your first test
 
 - **Try it on this Mac:** follow [Tomorrow's local test](#tomorrows-local-test).
@@ -626,7 +635,7 @@ Push this repository, including `Cargo.lock` and `.github/workflows/ci.yml`, to 
 
 The **Verify** workflow runs on pushes and pull requests:
 
-1. Rust formatting, Clippy, and integration tests.
+1. Rust formatting, Clippy, integration tests, and warning-free private-item rustdoc generation.
 2. Container builds and runtime checks on `ubuntu-latest` (AMD64) and `ubuntu-24.04-arm` (ARM64), using a generated sample video.
 3. Container recreation checks using persistent host data.
 4. A Chromium browser test for compact icons, tooltips, descriptions, and movie resume events.

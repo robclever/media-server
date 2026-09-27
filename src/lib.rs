@@ -1,3 +1,19 @@
+//! Core library for the Family Cinema media server.
+//!
+//! [`App`] owns the SQLite connection, configured media roots, persistent data
+//! directory, photo storage, authentication state, and Raspberry Pi work
+//! limits. [`router`] exposes that state through the HTTP interface. The binary
+//! in `main.rs` is deliberately small: it translates environment variables
+//! into an [`App`], scans the library, and starts Axum.
+//!
+//! # Persistence
+//!
+//! User accounts, sessions, movie metadata, approvals, covers, playback
+//! progress, albums, and photo metadata live in `library.sqlite3`. Movie files
+//! remain in read-only media roots. Photo originals and generated previews live
+//! in the writable photo directory.
+#![warn(missing_docs)]
+
 mod covers;
 mod photos;
 mod playback;
@@ -25,6 +41,12 @@ use tower_http::services::ServeFile;
 
 type ApiResult<T> = Result<T, StatusCode>;
 #[derive(Clone)]
+/// Shared application state used by every HTTP handler.
+///
+/// Clones are inexpensive because mutable state is reference counted. Open an
+/// instance with [`App::open`] or [`App::open_sources`], optionally replace its
+/// photo directory with [`App::with_photo_directory`], then pass it to
+/// [`router`].
 pub struct App {
     db: Arc<Mutex<Connection>>,
     media: BTreeMap<String, PathBuf>,
@@ -34,19 +56,33 @@ pub struct App {
     attempts: Arc<Mutex<Vec<i64>>>,
     cover_work: Arc<tokio::sync::Semaphore>,
 }
+/// Returns Unix time in whole seconds for sessions and rate limiting.
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
 }
+/// Converts internal implementation failures into a non-disclosing HTTP error.
 fn internal(_: impl std::fmt::Display) -> StatusCode {
     StatusCode::INTERNAL_SERVER_ERROR
 }
 impl App {
+    /// Opens an application with one media root named `default`.
+    ///
+    /// `media` must already exist. `data` is created when necessary and holds
+    /// `library.sqlite3` plus the default photo directory. `secure` controls
+    /// whether login cookies include the HTTPS-only `Secure` attribute.
     pub fn open(media: PathBuf, data: PathBuf, secure: bool) -> anyhow::Result<Self> {
         Self::open_sources(BTreeMap::from([("default".into(), media)]), data, secure)
     }
+    /// Opens an application with multiple named media roots.
+    ///
+    /// Source names become stable parts of movie identity and may contain only
+    /// ASCII letters, numbers, hyphens, and underscores. Roots are
+    /// canonicalized and may not overlap. Opening performs additive database
+    /// migrations but does not scan the filesystem; call [`App::scan`] after
+    /// construction.
     pub fn open_sources(
         mut media: BTreeMap<String, PathBuf>,
         data: PathBuf,
@@ -125,6 +161,10 @@ impl App {
             cover_work: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
+    /// Hashes and stores the Parents password and revokes every active session.
+    ///
+    /// Passwords shorter than twelve bytes are rejected. Only the Argon2 hash
+    /// is persisted.
     pub fn set_password(&self, password: &str) -> anyhow::Result<()> {
         anyhow::ensure!(password.len() >= 12, "Use at least 12 characters");
         let hash = Argon2::default()
@@ -141,6 +181,11 @@ impl App {
         tx.commit()?;
         Ok(())
     }
+    /// Recursively indexes supported video files in all configured roots.
+    ///
+    /// Existing display titles and Baby approvals are preserved for the same
+    /// `(source, relative path)` identity. Missing files are marked absent but
+    /// retained so their metadata returns if the path reappears.
     pub fn scan(&self) -> anyhow::Result<usize> {
         let mut files = Vec::new();
         for (source, root) in &self.media {
@@ -177,6 +222,7 @@ impl App {
         tx.commit()?;
         Ok(files.len())
     }
+    /// Checks whether the request carries an unexpired Parents session.
     fn parent(&self, headers: &HeaderMap) -> bool {
         let Some(token) = cookie(headers) else {
             return false;
@@ -192,6 +238,7 @@ impl App {
             .unwrap_or(false)
     }
 }
+/// Extracts the application session token from a Cookie header.
 fn cookie(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(header::COOKIE)?
@@ -200,6 +247,7 @@ fn cookie(headers: &HeaderMap) -> Option<&str> {
         .split(';')
         .find_map(|s| s.trim().strip_prefix("session="))
 }
+/// Applies the state-change header check and common browser security headers.
 async fn protections(req: Request, next: Next) -> Response {
     if req.method() != axum::http::Method::GET
         && req.method() != axum::http::Method::HEAD
@@ -221,6 +269,11 @@ async fn protections(req: Request, next: Next) -> Response {
     h.insert("content-security-policy", HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"));
     response
 }
+/// Builds the complete HTTP router, including embedded web assets and APIs.
+///
+/// State-changing requests are protected by the `X-Requested-With:
+/// custom-plex` header middleware. Individual handlers still enforce their own
+/// Parents or visibility rules.
 pub fn router(app: App) -> Router {
     Router::new()
         .route(
@@ -280,6 +333,7 @@ pub fn router(app: App) -> Router {
 struct Session {
     parent: bool,
 }
+/// Reports whether the current browser has a valid Parents session.
 async fn session(State(app): State<App>, headers: HeaderMap) -> Json<Session> {
     Json(Session {
         parent: app.parent(&headers),
@@ -289,6 +343,7 @@ async fn session(State(app): State<App>, headers: HeaderMap) -> Json<Session> {
 struct Login {
     password: String,
 }
+/// Verifies the Parents password and creates an eight-hour session cookie.
 async fn login(State(app): State<App>, Json(input): Json<Login>) -> ApiResult<Response> {
     {
         let mut attempts = app.attempts.lock().unwrap();
@@ -340,6 +395,7 @@ async fn login(State(app): State<App>, Json(input): Json<Login>) -> ApiResult<Re
     );
     Ok(([(header::SET_COOKIE, cookie)], StatusCode::NO_CONTENT).into_response())
 }
+/// Deletes the current server-side session and expires its browser cookie.
 async fn logout(State(app): State<App>, headers: HeaderMap) -> ApiResult<Response> {
     if let Some(token) = cookie(&headers) {
         app.db
@@ -358,14 +414,22 @@ async fn logout(State(app): State<App>, headers: HeaderMap) -> ApiResult<Respons
         .into_response())
 }
 #[derive(Serialize, Deserialize)]
+/// Movie metadata returned by `GET /api/movies`.
 pub struct Movie {
+    /// Stable SQLite identifier used by media, cover, and progress routes.
     pub id: i64,
+    /// Editable catalog title.
     pub title: String,
+    /// Configured media-source name containing the file.
     pub source: String,
+    /// Whether anonymous Baby users may see and stream the movie.
     pub approved: bool,
+    /// Shared resume position in seconds, when one is saved.
     pub position: Option<f64>,
+    /// Duration reported by the browser when progress was last saved.
     pub duration: Option<f64>,
 }
+/// Lists all present movies visible to the current profile with resume state.
 async fn movies(State(app): State<App>, headers: HeaderMap) -> ApiResult<Json<Vec<Movie>>> {
     let parent = app.parent(&headers);
     let db = app.db.lock().unwrap();
@@ -386,6 +450,7 @@ async fn movies(State(app): State<App>, headers: HeaderMap) -> ApiResult<Json<Ve
         .map_err(internal)?;
     Ok(Json(rows))
 }
+/// Runs a filesystem scan for an authenticated Parents request.
 async fn scan(State(app): State<App>, headers: HeaderMap) -> ApiResult<Json<usize>> {
     if !app.parent(&headers) {
         return Err(StatusCode::UNAUTHORIZED);
@@ -407,10 +472,12 @@ struct Rename {
     name: String,
 }
 
+/// Validates a trimmed display name without accepting control characters.
 fn valid_name(name: &str, maximum: usize) -> bool {
     !name.is_empty() && name.chars().count() <= maximum && !name.chars().any(char::is_control)
 }
 
+/// Persists a Parents-only display-title change without renaming the media file.
 async fn rename_movie(
     State(app): State<App>,
     Path(id): Path<i64>,
@@ -438,6 +505,7 @@ async fn rename_movie(
     }
     Ok(StatusCode::NO_CONTENT)
 }
+/// Grants or revokes Baby visibility for a present movie.
 async fn approve(
     State(app): State<App>,
     Path(id): Path<i64>,
@@ -461,6 +529,7 @@ async fn approve(
     }
     Ok(StatusCode::NO_CONTENT)
 }
+/// Resolves and streams a visible movie while containing paths within its root.
 async fn stream(State(app): State<App>, Path(id): Path<i64>, req: Request) -> ApiResult<Response> {
     let parent = app.parent(req.headers());
     let (source, path): (String, String) = app

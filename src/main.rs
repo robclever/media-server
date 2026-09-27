@@ -1,3 +1,9 @@
+//! Command-line entry point for Family Cinema.
+//!
+//! With no subcommand, configuration is read from environment variables, the
+//! media library is scanned, and the HTTP server starts. `set-password` updates
+//! the Parents password against the same data directory and exits.
+
 use custom_plex::{App, router};
 use std::{env, path::PathBuf};
 #[tokio::main]

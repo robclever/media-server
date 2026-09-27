@@ -1,4 +1,10 @@
 'use strict';
+/**
+ * Photo Album controller.
+ *
+ * Album state is enclosed in this IIFE while shared navigation, API, and dialog
+ * helpers come from app.js. Photo operations intentionally remain password-free.
+ */
 (() => {
   let currentAlbum = null;
   let photos = [];
@@ -7,14 +13,17 @@
   let busy = false;
   let revision = 0;
 
+  /** Persists the most recently used album for destination-menu ordering. */
   function rememberAlbum(id) {
     try { localStorage.setItem('photo-last-album', String(id)); } catch (_) {}
   }
 
+  /** Returns the last-used album ID, tolerating disabled browser storage. */
   function lastAlbum() {
     try { return Number(localStorage.getItem('photo-last-album')) || 0; } catch (_) { return 0; }
   }
 
+  /** Prompts for and persists a new album display name. */
   async function renameAlbum(album) {
     const name = await askName('Rename album', album.name);
     if (name === null || name.trim() === album.name) return;
@@ -24,6 +33,7 @@
     $('status').textContent = `Album renamed to ${album.name}.`;
   }
 
+  /** Prompts for and persists album-level descriptive text. */
   async function describeAlbum(album) {
     const description = await askDescription(`Describe ${album.name}`, album.description);
     if (description === null || description.trim() === album.description) return;
@@ -33,6 +43,7 @@
     $('status').textContent = `Description saved for ${album.name}.`;
   }
 
+  /** Confirms and permanently deletes an album and its photos. */
   async function deleteAlbum(album) {
     const contents = album.count === 1 ? '1 photo' : `${album.count} photos`;
     if (!await askDelete(`Delete “${album.name}” and ${contents}? This permanently removes the original photos and cannot be undone.`)) return;
@@ -41,6 +52,7 @@
     $('status').textContent = `Deleted ${album.name}.`;
   }
 
+  /** Loads and renders the album shelf, discarding stale overlapping responses. */
   async function loadAlbums() {
     const version = ++revision;
     show('albums');
@@ -72,6 +84,7 @@
     }
   }
 
+  /** Opens an album and loads its photo metadata. */
   async function openAlbum(album) {
     const version = ++revision;
     currentAlbum = album; photos = []; rememberAlbum(album.id);
@@ -82,6 +95,7 @@
     photos = result; renderPhotos();
   }
 
+  /** Rebuilds photo tiles from the active album's in-memory collection. */
   function renderPhotos() {
     $('photo-list').replaceChildren(); $('no-photos').hidden = photos.length > 0;
     photos.forEach((photo, index) => {
@@ -93,6 +107,7 @@
     });
   }
 
+  /** Populates the preview dialog for the selected photo. */
   function displayPhoto() {
     const photo = photos[selected];
     if (!photo) { $('photo-viewer').close(); return; }
@@ -103,6 +118,7 @@
     $('previous-photo').disabled = selected === 0; $('next-photo').disabled = selected === photos.length - 1;
   }
 
+  /** Renames the selected photo while retaining its stored files. */
   async function renamePhoto() {
     const photo = photos[selected];
     $('photo-viewer').close();
@@ -114,6 +130,7 @@
     $('photo-viewer').showModal();
   }
 
+  /** Saves or clears the selected photo's always-visible description field. */
   async function savePhotoDescription() {
     const photo = photos[selected];
     const description = $('photo-description-input').value;
@@ -127,6 +144,7 @@
     } finally { $('save-photo-description').disabled = false; }
   }
 
+  /** Loads eligible destination albums and opens the move menu. */
   async function openMoveMenu() {
     const photo = photos[selected];
     const albums = await api('/api/albums');
@@ -151,6 +169,7 @@
     $('photo-viewer').close(); $('move-dialog').showModal();
   }
 
+  /** Confirms and permanently deletes the selected photo and generated variants. */
   async function deletePhoto() {
     const photo = photos[selected];
     $('photo-viewer').close();

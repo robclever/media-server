@@ -5,6 +5,7 @@ use serde::Serialize;
 use std::{collections::BTreeSet, path::Path};
 
 #[derive(Serialize)]
+/// Capacity for one distinct underlying filesystem.
 struct Volume {
     name: String,
     total: u64,
@@ -12,6 +13,7 @@ struct Volume {
 }
 
 #[derive(Serialize)]
+/// Aggregate storage response shown on the profile chooser.
 struct Storage {
     total: u64,
     available: u64,
@@ -19,12 +21,14 @@ struct Storage {
 }
 
 #[cfg(unix)]
+/// Returns the filesystem device ID used to prevent double-counting mounts.
 fn device(path: &Path) -> std::io::Result<u64> {
     use std::os::unix::fs::MetadataExt;
     Ok(path.metadata()?.dev())
 }
 
 #[cfg(not(unix))]
+/// Produces a stable per-path fallback where device IDs are unavailable.
 fn device(path: &Path) -> std::io::Result<u64> {
     // Capacity remains useful on non-Unix development hosts. Paths are kept
     // distinct because a stable filesystem identifier is unavailable here.
@@ -34,6 +38,8 @@ fn device(path: &Path) -> std::io::Result<u64> {
     Ok(hasher.finish())
 }
 
+/// Computes capacity off the async runtime because `df` and metadata calls are
+/// blocking operations.
 async fn usage(State(app): State<App>) -> ApiResult<Json<Storage>> {
     tokio::task::spawn_blocking(move || {
         let mut roots = vec![
@@ -94,6 +100,7 @@ async fn usage(State(app): State<App>) -> ApiResult<Json<Storage>> {
     .map_err(internal)?
 }
 
+/// Returns the storage-reporting route.
 pub fn routes() -> Router<App> {
     Router::new().route("/api/storage", get(usage))
 }
