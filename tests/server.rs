@@ -205,6 +205,110 @@ async fn parents_can_rename_movies_and_scans_preserve_the_title() {
         .unwrap();
     assert_eq!(renamed.title, "Family Favorite");
 }
+
+#[tokio::test]
+async fn visible_movies_save_shared_progress_and_clear_it_near_the_end() {
+    let (tmp, state) = setup();
+    let app = router(state);
+    let cookie = login(&app).await;
+    let movies = list(&app, &cookie).await;
+    let family = movies.iter().find(|movie| movie.title == "Family").unwrap();
+    let private = movies
+        .iter()
+        .find(|movie| movie.title == "Private")
+        .unwrap();
+    assert_eq!(
+        request(
+            &app,
+            "POST",
+            &format!("/api/movies/{}/progress", private.id),
+            "",
+            r#"{"position":20,"duration":100}"#,
+        )
+        .await
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        request(
+            &app,
+            "POST",
+            &format!("/api/movies/{}/progress", private.id),
+            &cookie,
+            r#"{"position":20,"duration":100}"#,
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        list(&app, &cookie)
+            .await
+            .into_iter()
+            .find(|movie| movie.id == private.id)
+            .unwrap()
+            .position,
+        Some(20.0)
+    );
+    request(
+        &app,
+        "POST",
+        &format!("/api/movies/{}/approval", family.id),
+        &cookie,
+        r#"{"approved":true}"#,
+    )
+    .await;
+    assert_eq!(
+        request(
+            &app,
+            "POST",
+            &format!("/api/movies/{}/progress", family.id),
+            "",
+            r#"{"position":37.5,"duration":120}"#,
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    for invalid in [
+        r#"{"position":-1,"duration":120}"#,
+        r#"{"position":10,"duration":0}"#,
+        r#"{"position":10,"duration":604801}"#,
+    ] {
+        assert_eq!(
+            request(
+                &app,
+                "POST",
+                &format!("/api/movies/{}/progress", family.id),
+                "",
+                invalid,
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let saved = list(&app, "").await.remove(0);
+    assert_eq!(saved.position, Some(37.5));
+    assert_eq!(saved.duration, Some(120.0));
+
+    let reopened =
+        router(App::open(tmp.path().join("media"), tmp.path().join("data"), false).unwrap());
+    assert_eq!(list(&reopened, "").await.remove(0).position, Some(37.5));
+    assert_eq!(
+        request(
+            &reopened,
+            "POST",
+            &format!("/api/movies/{}/progress", family.id),
+            "",
+            r#"{"position":110,"duration":120}"#,
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(list(&reopened, "").await.remove(0).position, None);
+}
 #[tokio::test]
 async fn session_expiry_csrf_and_scan_removal() {
     let (tmp, state) = setup();

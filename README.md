@@ -43,6 +43,9 @@ For a TV on the same home network, use `http://<this-macs-lan-ip>:8080`, not `lo
 - Profile chooser, searchable movie shelf, keyboard/remote navigation, and browser video playback.
 - Password-free Photo Album profile with named collections, multi-photo uploads, previews, and original downloads.
 - Rename movie titles, albums, and photos; move photos between albums; and delete photos or albums with confirmation.
+- Compact icon controls with hover and keyboard-focus tooltips on movie and photo-album cards.
+- Persistent descriptions for photo albums and individual photos.
+- Shared movie resume positions that survive restarts and deployments.
 - Home-profile storage usage across the database, movie locations, and photo storage, with shared filesystems counted once.
 - Baby sees and streams only titles explicitly approved by a parent.
 - Parents can browse everything, scan the library, and change Baby approvals.
@@ -201,7 +204,7 @@ Scans happen on startup and when you click **Scan library**. There is no automat
 
 ### 4. Decide whether Baby can watch it
 
-Click **Add to Baby** for an approved movie, then switch to Baby to check that it appears. Leave the button unchanged for parents-only content. Click **Available to Baby** while signed in as Parents to revoke approval. Reopen the Baby library or refresh another device to update its displayed list.
+Use the star icon on a movie card to add it to Baby, then switch to Baby to check that it appears. A filled star means the movie is available to Baby; select it again to revoke approval. Hover over an icon, or move keyboard focus to it, to see its text tooltip. Reopen the Baby library or refresh another device to update its displayed list.
 
 ### Rename, replace, or remove movies
 
@@ -210,14 +213,20 @@ Click **Add to Baby** for an approved movie, then switch to Baby to check that i
 - **Remove:** move the file outside the media folder or delete it, then scan. Its card disappears. Stored database entries are retained, so reintroducing the exact same path restores its previous approval.
 - **Missing after a scan:** check that the copy completed, its final extension is supported, it is inside the configured folder, it is not a symlink, and the container can read it. Then check whether you are viewing Baby or Parents.
 
+## Movie resume positions
+
+Playback position is saved about every ten seconds and when playback pauses, the player closes, or the page moves into the background. Reopening the movie starts at the saved position, and the movie card shows the resume time. Watching to within 15 seconds of the end clears the saved position so the next play starts at the beginning.
+
+Resume positions are shared across Baby and Parents and across every device using this server. They are stored in `DATA_DIR/library.sqlite3`, so they survive rescans, container recreation, and deployments that retain the data directory. A database backup includes them.
+
 ## Movie cover images
 
-Every movie card has **Add / change image** and **Use automatic image** buttons. Both Baby and Parents may change the image of a movie they can see. Baby cannot view or change images for parents-only movies. Cover changes are shared across devices and do not change a movie's Baby approval.
+Every movie card has a small picture icon for **Add or change image** and a circular-arrow icon for **Use automatic image**. Hover over an icon, or move keyboard focus to it, to see its text tooltip. Both Baby and Parents may change the image of a movie they can see. Baby cannot view or change images for parents-only movies. Cover changes are shared across devices and do not change a movie's Baby approval.
 
 ### Upload an image
 
 1. Open the catalog and find the movie.
-2. Click **Add / change image** and choose a JPEG, PNG, or WebP from your computer or phone.
+2. Select the picture icon with the **Add or change image** tooltip and choose a JPEG, PNG, or WebP from your computer or phone.
 3. Wait for the image-saved message. The new image replaces the catalog placeholder or automatic cover.
 
 The maximum upload is 8 MiB, with at most 8192 pixels on either side and a bounded decoding memory budget. Large images that exceed the decoding budget are also rejected. SVG, GIF, and HEIC are not supported; export a JPEG or PNG first. Images are decoded, resized to fit within 640 × 640 pixels, and stored as JPEGs, rather than served as arbitrary uploaded files. The original media directory remains read-only.
@@ -232,7 +241,7 @@ When no uploaded image exists, the server checks, in order:
 
 Images are generated on demand as cards enter view, so the first load may take a little time. Work is serialized to limit load on the Pi, with a 20-second timeout per extraction attempt. Results are cached in SQLite. If the video or matching image changes its size or modification timestamp, its automatic cover is refreshed on the next request. Unusable-image/frame results can be retried with **Use automatic image**.
 
-**Use automatic image** deletes the saved cover/cache for that movie and repeats the order above. It does not remove a matching image from the media folder; remove or rename that image yourself if you specifically want a movie frame instead. It never deletes the video. To see another device's image change, refresh the catalog.
+The circular-arrow icon with the **Use automatic image** tooltip deletes the saved cover/cache for that movie and repeats the order above. It does not remove a matching image from the media folder; remove or rename that image yourself if you specifically want a movie frame instead. It never deletes the video. To see another device's image change, refresh the catalog.
 
 FFmpeg is included in the Docker image. For native Rust development, install FFmpeg separately and ensure `ffmpeg` is on the server process's `PATH`; uploads and matching images still work without it, but frame extraction cannot. This feature does not perform playback transcoding or download posters from external services.
 
@@ -339,11 +348,11 @@ Choose **Photo Album** on the profile screen. No password is required to view al
 3. Select a photo to open its larger preview. Use **Previous** / **Next** to browse and **Download original** to retrieve the unchanged upload.
 4. Choose **All albums** to return to the collections, or **Switch profile** to return home.
 
-### Manage names, albums, and photos
+### Manage names, descriptions, albums, and photos
 
-- In **Parents**, choose **Rename title** on a movie card. The display title is stored in the database and remains after rescans; the video filename is unchanged. Baby sees the renamed title after the movie is approved.
-- Album cards have rename and trash icons along their lower edge. Renaming changes the display name. Deleting an album asks for confirmation and permanently removes the album, every photo in it, and each stored original/preview/thumbnail.
-- Open a photo to find rename, plus/move, and trash icons at the bottom of the preview. Rename changes its display title without renaming the stored file. Move opens the available album list; the most recently opened, created, uploaded-to, or moved-to album is offered first. The current album is omitted.
+- In **Parents**, use the pencil icon on a movie card to rename its title. The display title is stored in the database and remains after rescans; the video filename is unchanged. Baby sees the renamed title after the movie is approved.
+- Album cards have small rename, description, and trash icons along their lower edge. Hover over an icon, or move keyboard focus to it, to see its text tooltip. Renaming changes the display name. The description icon opens a multiline field for up to 2,000 characters. Deleting an album asks for confirmation and permanently removes the album, every photo in it, and each stored original/preview/thumbnail.
+- Open a photo to find an always-visible **Photo description** field below the picture. Enter up to 2,000 characters and choose **Save description**; the saved text returns whenever that photo is opened. Small rename, plus/move, and trash icons remain at the bottom of the preview. Rename changes its display title without renaming the stored file. Move opens the available album list; the most recently opened, created, uploaded-to, or moved-to album is offered first. The current album is omitted.
 - Deleting a photo asks for confirmation and permanently removes its original plus generated browsing images. These deletions do not have an in-app trash or undo. Back up the photo storage and database together.
 
 Photo and album management remains password-free, matching the Photo Album profile. Anyone who can reach the server on the trusted home network can rename, move, or permanently delete photos and albums.
@@ -354,7 +363,7 @@ The profile chooser shows used, available, and total space across the app databa
 
 Supported uploads: JPEG, PNG, and WebP, up to **24 MiB per file**, at most **8192 pixels per side**, within the decoder's memory limit. iPhone HEIC/HEIF and Live Photo videos are not supported: export pictures as JPEG first, or use the iPhone Camera's **Most Compatible** format for future photos. Animated files produce a still preview. EXIF orientation is applied to previews; originals retain their original bytes and metadata. Do not upload files you do not want other users of this server to download.
 
-Originals, previews (up to 1600 pixels), and thumbnails (up to 400 pixels) are saved to disk; album names and photo records are stored in `DATA_DIR/library.sqlite3`. Uploads are processed one at a time per browser, and decoding shares a single work slot with movie cover generation to limit Pi memory use. Albums survive restarts and deployments. This first version does not include album/photo deletion, moving photos between albums, automatic imports from existing directories, deduplication, or a slideshow.
+Originals, previews (up to 1600 pixels), and thumbnails (up to 400 pixels) are saved to disk; album names, descriptions, and photo records are stored in `DATA_DIR/library.sqlite3`. Descriptions stay associated with the photo or album without modifying the original image file. Uploads are processed one at a time per browser, and decoding shares a single work slot with movie cover generation to limit Pi memory use. Albums survive restarts and deployments. Automatic imports from existing directories, deduplication, and a slideshow are not included.
 
 ### Photo storage locations
 
@@ -554,7 +563,21 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
 ```
 
-Tests cover anonymous access, invalid passwords, approval changes, logout, password reset, expiry, throttling, missing request headers, video byte ranges, removed media, persistent approvals after rescanning/reopening, symlink escapes, multiple locations, independent approvals for duplicate filenames, invalid location configuration, and migration from the original database schema.
+Tests cover anonymous access, invalid passwords, approval changes, logout, password reset, expiry, throttling, missing request headers, video byte ranges, removed media, persistent approvals after rescanning/reopening, symlink escapes, multiple locations, independent approvals for duplicate filenames, invalid location configuration, and migration from the original database schema. They also cover shared movie resume positions, parent-only progress authorization, completed-movie reset behavior, invalid playback values, album/photo description persistence through moves and restarts, description clearing, and description length/content validation.
+
+These are HTTP integration tests rather than isolated function-level unit tests. That is intentional: the new behavior crosses routing, authorization, SQLite migrations, persistence, and serialization, so exercising the complete request path provides more useful protection. Compact controls, tooltips, and video-element events use the browser test below because Rust tests cannot verify rendered size, hover behavior, or browser media events.
+
+### Browser interaction test
+
+Install the browser-test dependency and Chromium once, then run the isolated test:
+
+```sh
+npm ci
+npx playwright install chromium
+npm run test:browser
+```
+
+The Playwright test starts its own server on port `18084` with temporary media, data, and photo directories. It creates a disposable 40-second video and password, checks that movie/album/photo action icons remain at most 36 pixels square, confirms hover tooltips, edits an album description, saves and reopens an individual photo description through its visible field, saves playback from a video event, closes the player, and confirms the next play resumes at the saved time. The temporary directory is removed when the test server exits. FFmpeg must be installed locally; GitHub Actions installs FFmpeg and Chromium automatically.
 
 ### Container checks
 
@@ -585,7 +608,7 @@ docker compose down
 unset COMPOSE_PROJECT_NAME HOST_MEDIA_DIR HOST_DATA_DIR PORT PLEX_IMAGE
 ```
 
-Use new empty test directories for another run. The full check verifies login, approval, streaming, seeking, persistence after container recreation (including a fresh login with the original password), revocation, and logout. Temporary test credentials remain only in the disposable test database.
+Use new empty test directories for another run. The full check verifies login, approval, streaming, seeking, resume progress, photo and album descriptions, persistence after container recreation (including a fresh login with the original password), revocation, and logout. Temporary test credentials remain only in the disposable test database.
 
 ### Test multiple Docker locations
 
@@ -606,7 +629,8 @@ The **Verify** workflow runs on pushes and pull requests:
 1. Rust formatting, Clippy, and integration tests.
 2. Container builds and runtime checks on `ubuntu-latest` (AMD64) and `ubuntu-24.04-arm` (ARM64), using a generated sample video.
 3. Container recreation checks using persistent host data.
-4. On a `v*` tag, after all tests pass, multi-architecture publication to `ghcr.io/<owner>/<repository>` with version and commit tags.
+4. A Chromium browser test for compact icons, tooltips, descriptions, and movie resume events.
+5. On a `v*` tag, after all tests pass, multi-architecture publication to `ghcr.io/<owner>/<repository>` with version and commit tags.
 
 Native ARM64 runner availability is documented in [GitHub's hosted runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). GitHub Actions usage depends on your repository and account limits.
 
@@ -644,9 +668,10 @@ After the script reports success:
 
 1. Open [the Pi server](http://192.168.0.73:8080) on your home network and refresh the page.
 2. Choose **Parents** and sign in with your existing password.
-3. Confirm your movies and Baby approvals are present. Play a movie and try seeking.
-4. On a movie card, use **Add / change image** to upload artwork, or **Use automatic image** to return to local artwork or an extracted frame. Baby can change images for approved movies too.
-5. Switch to **Baby** and confirm only approved movies appear.
+3. Confirm your movies and Baby approvals are present. Play a movie for at least ten seconds, close it, reopen it, and confirm it resumes.
+4. On a movie card, use the picture icon to upload artwork, or the circular-arrow icon to return to local artwork or an extracted frame. Baby can change images for approved movies too.
+5. Open Photo Album, add descriptions to an album and a photo, refresh the page, and confirm both remain.
+6. Switch to **Baby** and confirm only approved movies appear.
 
 For server diagnostics, run from the Mac:
 
@@ -753,6 +778,8 @@ To restore the default data path, stop the service, move the current `data` dire
 | `.local` address fails | Use the Pi IP address. |
 
 ## Validation status
+
+Compact-controls, descriptions, and resume update (September 26–27, 2026): all 17 Rust integration tests pass (seven photo/storage scenarios and ten movie/auth/streaming scenarios), including the added boundary checks documented above. Formatting, Clippy with warnings denied, JavaScript syntax checks, Python script compilation, and the repository diff check pass. The Playwright browser test passes locally in Chromium and covers compact movie/album/photo icons, hover tooltips, interface-driven descriptions and photo upload, playback event saving, and resume seeking against disposable data; GitHub Actions runs the same test. The isolated container check also verifies description and resume persistence after container recreation, but it was not rerun locally for this update. The physical Pi was deployed successfully on September 27, 2026, including the follow-up that exposes an always-visible description field on each individual photo preview. Docker and LAN health checks passed, and the deployed page contains the new **Photo description** field and save control. The latest deployment backup is `/home/rob/custom-plex-backups/20260927T011922Z`, and the rollback image is `custom-plex:before-20260927t011922z`. The existing password, media mounts, and external photo storage were retained.
 
 Photo-management update (September 17–18, 2026): all 15 Rust integration tests passed (six photo/storage scenarios and nine movie/auth/streaming scenarios), along with formatting, Clippy with warnings denied, JavaScript syntax checks, and four deployment-script tests. The isolated Docker check verified movie rename, photo/album rename and move, storage reporting, original-file persistence across container recreation, permanent photo/album deletion, password persistence, covers, streaming, and authorization. Browser checks verified the home storage meter, embedded rename dialogs, album/photo rename, photo-preview action icons, recently used album ordering, moving a photo, updated album counts, and the permanent-delete confirmation. The local port-8080 server was updated after a backup at `backups/before-photo-management-20260917T203500Z/data.tar.gz`; its password account and movie approvals were unchanged.
 

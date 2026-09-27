@@ -35,11 +35,13 @@ pub struct Album {
     name: String,
     count: i64,
     cover_id: Option<i64>,
+    description: String,
 }
 #[derive(Serialize)]
 pub struct Photo {
     id: i64,
     name: String,
+    description: String,
 }
 #[derive(Deserialize)]
 pub struct NewAlbum {
@@ -60,6 +62,11 @@ pub struct MovePhoto {
     album_id: i64,
 }
 
+#[derive(Deserialize)]
+pub struct Description {
+    description: String,
+}
+
 fn clean_name(value: &str, maximum: usize) -> ApiResult<&str> {
     let value = value.trim();
     if value.is_empty() || value.chars().count() > maximum || value.chars().any(char::is_control) {
@@ -71,7 +78,7 @@ fn clean_name(value: &str, maximum: usize) -> ApiResult<&str> {
 
 pub async fn albums(State(app): State<App>) -> ApiResult<Json<Vec<Album>>> {
     let db = app.db.lock().unwrap();
-    let mut stmt = db.prepare("SELECT a.id,a.name,COUNT(p.id),MIN(p.id) FROM albums a LEFT JOIN photos p ON p.album_id=a.id GROUP BY a.id ORDER BY a.updated_at DESC,a.id DESC").map_err(internal)?;
+    let mut stmt = db.prepare("SELECT a.id,a.name,COUNT(p.id),MIN(p.id),a.description FROM albums a LEFT JOIN photos p ON p.album_id=a.id GROUP BY a.id ORDER BY a.updated_at DESC,a.id DESC").map_err(internal)?;
     let rows = stmt
         .query_map([], |r| {
             Ok(Album {
@@ -79,6 +86,7 @@ pub async fn albums(State(app): State<App>) -> ApiResult<Json<Vec<Album>>> {
                 name: r.get(1)?,
                 count: r.get(2)?,
                 cover_id: r.get(3)?,
+                description: r.get(4)?,
             })
         })
         .map_err(internal)?;
@@ -102,6 +110,7 @@ pub async fn create(
             name: name.into(),
             count: 0,
             cover_id: None,
+            description: String::new(),
         }),
     ))
 }
@@ -131,13 +140,14 @@ pub async fn list(State(app): State<App>, Path(id): Path<i64>) -> ApiResult<Json
     )
     .map_err(internal)?;
     let mut stmt = db
-        .prepare("SELECT id,name FROM photos WHERE album_id=?1 ORDER BY id")
+        .prepare("SELECT id,name,description FROM photos WHERE album_id=?1 ORDER BY id")
         .map_err(internal)?;
     let rows = stmt
         .query_map([id], |r| {
             Ok(Photo {
                 id: r.get(0)?,
                 name: r.get(1)?,
+                description: r.get(2)?,
             })
         })
         .map_err(internal)?;
@@ -232,7 +242,14 @@ pub async fn upload(
         }
         let photo_id = tx.last_insert_rowid();
         tx.commit().map_err(internal)?;
-        Ok((StatusCode::CREATED, Json(Photo { id: photo_id, name })))
+        Ok((
+            StatusCode::CREATED,
+            Json(Photo {
+                id: photo_id,
+                name,
+                description: String::new(),
+            }),
+        ))
     })
     .await
     .map_err(internal)?
@@ -271,6 +288,59 @@ pub async fn rename_photo(
         .lock()
         .unwrap()
         .execute("UPDATE photos SET name=?1 WHERE id=?2", params![name, id])
+        .map_err(internal)?;
+    if changed == 0 {
+        Err(StatusCode::NOT_FOUND)
+    } else {
+        Ok(StatusCode::NO_CONTENT)
+    }
+}
+
+fn clean_description(value: &str) -> ApiResult<&str> {
+    let value = value.trim();
+    if value.chars().count() > 2000 || value.chars().any(|character| character == '\0') {
+        Err(StatusCode::BAD_REQUEST)
+    } else {
+        Ok(value)
+    }
+}
+
+pub async fn describe_album(
+    State(app): State<App>,
+    Path(id): Path<i64>,
+    Json(input): Json<Description>,
+) -> ApiResult<StatusCode> {
+    let description = clean_description(&input.description)?;
+    let changed = app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE albums SET description=?1,updated_at=?2 WHERE id=?3",
+            params![description, recent(), id],
+        )
+        .map_err(internal)?;
+    if changed == 0 {
+        Err(StatusCode::NOT_FOUND)
+    } else {
+        Ok(StatusCode::NO_CONTENT)
+    }
+}
+
+pub async fn describe_photo(
+    State(app): State<App>,
+    Path(id): Path<i64>,
+    Json(input): Json<Description>,
+) -> ApiResult<StatusCode> {
+    let description = clean_description(&input.description)?;
+    let changed = app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE photos SET description=?1 WHERE id=?2",
+            params![description, id],
+        )
         .map_err(internal)?;
     if changed == 0 {
         Err(StatusCode::NOT_FOUND)
@@ -478,8 +548,8 @@ pub async fn file(
 }
 
 pub fn initialize(db: &rusqlite::Connection, data: &std::path::Path) -> anyhow::Result<PathBuf> {
-    db.execute_batch("CREATE TABLE IF NOT EXISTS albums (id INTEGER PRIMARY KEY, name TEXT NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY, album_id INTEGER NOT NULL REFERENCES albums(id), name TEXT NOT NULL, storage TEXT NOT NULL UNIQUE, extension TEXT NOT NULL);
+    db.execute_batch("CREATE TABLE IF NOT EXISTS albums (id INTEGER PRIMARY KEY, name TEXT NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY, album_id INTEGER NOT NULL REFERENCES albums(id), name TEXT NOT NULL, storage TEXT NOT NULL UNIQUE, extension TEXT NOT NULL, description TEXT NOT NULL DEFAULT '');
         CREATE INDEX IF NOT EXISTS photos_album ON photos(album_id);")?;
     let has_updated_at = db
         .prepare("PRAGMA table_info(albums)")?
@@ -492,6 +562,18 @@ pub fn initialize(db: &rusqlite::Connection, data: &std::path::Path) -> anyhow::
             "ALTER TABLE albums ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
             [],
         )?;
+    }
+    for (table, column) in [("albums", "description"), ("photos", "description")] {
+        let columns = db
+            .prepare(&format!("PRAGMA table_info({table})"))?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !columns.iter().any(|name| name == column) {
+            db.execute(
+                &format!("ALTER TABLE {table} ADD COLUMN description TEXT NOT NULL DEFAULT ''"),
+                [],
+            )?;
+        }
     }
     let photos = data.join("photo-albums");
     std::fs::create_dir_all(&photos)?;
@@ -520,6 +602,10 @@ pub fn routes() -> axum::Router<App> {
         .route("/api/albums/{id}", axum::routing::delete(delete_album))
         .route("/api/albums/{id}/name", axum::routing::post(rename_album))
         .route(
+            "/api/albums/{id}/description",
+            axum::routing::post(describe_album),
+        )
+        .route(
             "/api/albums/{id}/photos",
             get(list)
                 .post(upload)
@@ -527,6 +613,10 @@ pub fn routes() -> axum::Router<App> {
         )
         .route("/api/photos/{id}", axum::routing::delete(delete_photo))
         .route("/api/photos/{id}/name", axum::routing::post(rename_photo))
+        .route(
+            "/api/photos/{id}/description",
+            axum::routing::post(describe_photo),
+        )
         .route("/api/photos/{id}/album", axum::routing::post(move_photo))
         .route("/api/photos/{id}/{variant}", get(file))
 }

@@ -1,5 +1,6 @@
 mod covers;
 mod photos;
+mod playback;
 mod storage;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use axum::{
@@ -98,6 +99,7 @@ impl App {
             tx.commit()?;
         }
         db.execute_batch("CREATE TABLE IF NOT EXISTS covers (movie_id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, jpeg BLOB NOT NULL);")?;
+        playback::initialize(&db)?;
         let photos = photos::initialize(&db, &data)?;
         // Removed sources must never remain visible between startup and the first scan.
         let tx = db.transaction()?;
@@ -243,7 +245,17 @@ pub fn router(app: App) -> Router {
                 )
             }),
         )
+        .route(
+            "/controls.css",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/css")],
+                    include_str!("../web/controls.css"),
+                )
+            }),
+        )
         .merge(photos::routes())
+        .merge(playback::routes())
         .merge(storage::routes())
         .route("/health", get(|| async { "ok" }))
         .route("/api/session", get(session))
@@ -351,11 +363,13 @@ pub struct Movie {
     pub title: String,
     pub source: String,
     pub approved: bool,
+    pub position: Option<f64>,
+    pub duration: Option<f64>,
 }
 async fn movies(State(app): State<App>, headers: HeaderMap) -> ApiResult<Json<Vec<Movie>>> {
     let parent = app.parent(&headers);
     let db = app.db.lock().unwrap();
-    let mut stmt = db.prepare("SELECT id,title,approved,source FROM movies WHERE present=1 AND (approved=1 OR ?1) ORDER BY title COLLATE NOCASE").map_err(internal)?;
+    let mut stmt = db.prepare("SELECT m.id,m.title,m.approved,m.source,p.position,p.duration FROM movies m LEFT JOIN playback_progress p ON p.movie_id=m.id WHERE m.present=1 AND (m.approved=1 OR ?1) ORDER BY m.title COLLATE NOCASE").map_err(internal)?;
     let rows = stmt
         .query_map([parent], |r| {
             Ok(Movie {
@@ -363,6 +377,8 @@ async fn movies(State(app): State<App>, headers: HeaderMap) -> ApiResult<Json<Ve
                 title: r.get(1)?,
                 approved: r.get(2)?,
                 source: r.get(3)?,
+                position: r.get(4)?,
+                duration: r.get(5)?,
             })
         })
         .map_err(internal)?

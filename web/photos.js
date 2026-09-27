@@ -24,6 +24,15 @@
     $('status').textContent = `Album renamed to ${album.name}.`;
   }
 
+  async function describeAlbum(album) {
+    const description = await askDescription(`Describe ${album.name}`, album.description);
+    if (description === null || description.trim() === album.description) return;
+    await api(`/api/albums/${album.id}/description`, {description});
+    album.description = description.trim();
+    await loadAlbums();
+    $('status').textContent = `Description saved for ${album.name}.`;
+  }
+
   async function deleteAlbum(album) {
     const contents = album.count === 1 ? '1 photo' : `${album.count} photos`;
     if (!await askDelete(`Delete “${album.name}” and ${contents}? This permanently removes the original photos and cannot be undone.`)) return;
@@ -49,20 +58,24 @@
       }
       const title = document.createElement('h2'); title.textContent = album.name;
       const count = document.createElement('p'); count.textContent = `${album.count} photo${album.count === 1 ? '' : 's'}`;
-      open.append(title, count); open.onclick = () => openAlbum(album).catch(report);
+      open.append(title, count);
+      if (album.description) { const description = document.createElement('p'); description.className = 'description album-summary'; description.textContent = album.description; open.append(description); }
+      open.onclick = () => openAlbum(album).catch(report);
       const actions = document.createElement('div'); actions.className = 'icon-actions compact';
-      const rename = document.createElement('button'); rename.title = 'Rename album'; rename.setAttribute('aria-label', `Rename ${album.name}`); rename.innerHTML = '✎<span>Rename</span>';
+      const rename = document.createElement('button'); rename.className = 'icon-button'; rename.dataset.tooltip = 'Rename album'; rename.setAttribute('aria-label', `Rename ${album.name}`); rename.textContent = '✎';
       rename.onclick = () => renameAlbum(album).catch(report);
-      const remove = document.createElement('button'); remove.className = 'danger'; remove.title = 'Delete album'; remove.setAttribute('aria-label', `Delete ${album.name}`); remove.innerHTML = '🗑<span>Delete</span>';
+      const describe = document.createElement('button'); describe.className = 'icon-button'; describe.dataset.tooltip = 'Edit description'; describe.setAttribute('aria-label', `Edit description for ${album.name}`); describe.textContent = '☰';
+      describe.onclick = () => describeAlbum(album).catch(report);
+      const remove = document.createElement('button'); remove.className = 'icon-button danger'; remove.dataset.tooltip = 'Delete album'; remove.setAttribute('aria-label', `Delete ${album.name}`); remove.textContent = '🗑';
       remove.onclick = () => deleteAlbum(album).catch(report);
-      actions.append(rename, remove); card.append(open, actions); $('album-list').append(card);
+      actions.append(rename, describe, remove); card.append(open, actions); $('album-list').append(card);
     }
   }
 
   async function openAlbum(album) {
     const version = ++revision;
     currentAlbum = album; photos = []; rememberAlbum(album.id);
-    $('album-title').textContent = album.name; $('photo-list').replaceChildren();
+    $('album-title').textContent = album.name; $('album-description').textContent = album.description || ''; $('photo-list').replaceChildren();
     $('photo-files').value = ''; $('upload-progress').textContent = ''; show('album-detail');
     const result = await api(`/api/albums/${album.id}/photos`);
     if (version !== revision || $('album-detail').hidden) return;
@@ -83,7 +96,7 @@
   function displayPhoto() {
     const photo = photos[selected];
     if (!photo) { $('photo-viewer').close(); return; }
-    $('photo-title').textContent = photo.name; $('full-photo').alt = photo.name;
+    $('photo-title').textContent = photo.name; $('photo-description-input').value = photo.description || ''; $('photo-description-status').textContent = 'Up to 2,000 characters.'; $('full-photo').alt = photo.name;
     $('full-photo').src = `/api/photos/${photo.id}/preview`;
     $('download-photo').href = `/api/photos/${photo.id}/original`;
     $('download-photo').download = photo.name;
@@ -99,6 +112,19 @@
     photo.name = name.trim(); displayPhoto(); renderPhotos();
     $('status').textContent = `Photo renamed to ${photo.name}.`;
     $('photo-viewer').showModal();
+  }
+
+  async function savePhotoDescription() {
+    const photo = photos[selected];
+    const description = $('photo-description-input').value;
+    if (description.trim() === photo.description) { $('photo-description-status').textContent = 'Description is already saved.'; return; }
+    $('save-photo-description').disabled = true;
+    try {
+      await api(`/api/photos/${photo.id}/description`, {description});
+      photo.description = description.trim(); renderPhotos();
+      $('photo-description-input').value = photo.description;
+      $('photo-description-status').textContent = 'Description saved.';
+    } finally { $('save-photo-description').disabled = false; }
   }
 
   async function openMoveMenu() {
@@ -171,6 +197,7 @@
   $('previous-photo').onclick = () => { if (selected > 0) { selected--; displayPhoto(); } };
   $('next-photo').onclick = () => { if (selected + 1 < photos.length) { selected++; displayPhoto(); } };
   $('rename-photo').onclick = () => renamePhoto().catch(report);
+  $('save-photo-description').onclick = () => savePhotoDescription().catch(report);
   $('move-photo').onclick = () => openMoveMenu().catch(report);
   $('delete-photo').onclick = () => deletePhoto().catch(report);
   $('cancel-move').onclick = () => { $('move-dialog').close(); if (photos[selected]) { displayPhoto(); $('photo-viewer').showModal(); } };

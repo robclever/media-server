@@ -3,6 +3,8 @@ const $ = id => document.getElementById(id);
 let parent = false;
 let collection = [];
 let returnFocus;
+let currentMovie = null;
+let lastSavedAt = 0;
 async function api(path, data, method) {
   const response = await fetch(path, {method: method || (data === undefined ? 'GET' : 'POST'), headers: {'Content-Type': 'application/json', 'X-Requested-With': 'custom-plex'}, body: data === undefined ? undefined : JSON.stringify(data)});
   if (!response.ok) {
@@ -28,6 +30,19 @@ function finishEdit(value) {
 $('edit-form').onsubmit = event => { event.preventDefault(); finishEdit($('edit-name').value); };
 $('cancel-edit').onclick = () => finishEdit(null);
 $('edit-dialog').addEventListener('cancel', event => { event.preventDefault(); finishEdit(null); });
+let descriptionResolution;
+function askDescription(heading, value) {
+  return new Promise(resolve => {
+    descriptionResolution = resolve; $('description-heading').textContent = heading; $('description-text').value = value || '';
+    $('description-dialog').showModal(); $('description-text').focus();
+  });
+}
+function finishDescription(value) {
+  const resolve = descriptionResolution; descriptionResolution = null; $('description-dialog').close(); resolve?.(value);
+}
+$('description-form').onsubmit = event => { event.preventDefault(); finishDescription($('description-text').value); };
+$('cancel-description').onclick = () => finishDescription(null);
+$('description-dialog').addEventListener('cancel', event => { event.preventDefault(); finishDescription(null); });
 let confirmResolution;
 function askDelete(message) {
   return new Promise(resolve => {
@@ -84,17 +99,28 @@ function render() {
     refreshCover();
     const title = document.createElement('h2'); title.textContent = movie.title;
     play.append(cover, title); play.setAttribute('aria-label', `Play ${movie.title}`);
-    play.onclick = () => { returnFocus = play; $('playing-title').textContent = movie.title; $('playback-error').hidden = true; $('video').src = `/media/${movie.id}`; $('player').showModal(); $('video').focus(); $('video').play().catch(() => {}); };
+    const resumeAt = Number(movie.position) || 0;
+    if (resumeAt > 1) {
+      const resume = document.createElement('p'); resume.className = 'resume'; resume.textContent = `Resume at ${formatTime(resumeAt)}`; play.append(resume);
+    }
+    play.onclick = () => {
+      returnFocus = play; currentMovie = movie; lastSavedAt = resumeAt;
+      $('playing-title').textContent = movie.title; $('resume-message').textContent = resumeAt > 1 ? `Resuming from ${formatTime(resumeAt)}` : '';
+      $('playback-error').hidden = true; $('video').src = `/media/${movie.id}`; $('player').showModal(); $('video').focus(); $('video').play().catch(() => {});
+    };
     card.append(play);
     if (parent) {
       const location = document.createElement('p'); location.className = 'source';
       location.textContent = `Location: ${movie.source}`; card.append(location);
     }
+    const imageActions = document.createElement('div'); imageActions.className = 'icon-actions compact movie-actions';
     if (parent) {
-      const approval = document.createElement('button'); approval.className = 'approval'; approval.textContent = movie.approved ? '✓ Available to Baby' : '+ Add to Baby'; approval.setAttribute('aria-pressed', String(movie.approved));
-      approval.onclick = async () => { try { await api(`/api/movies/${movie.id}/approval`, {approved: !movie.approved}); movie.approved = !movie.approved; approval.textContent = movie.approved ? '✓ Available to Baby' : '+ Add to Baby'; approval.setAttribute('aria-pressed', String(movie.approved)); } catch(error) { report(error); } };
-      card.append(approval);
-      const rename = document.createElement('button'); rename.className = 'approval'; rename.textContent = '✎ Rename title';
+      const approval = document.createElement('button'); approval.className = 'icon-button'; approval.textContent = movie.approved ? '★' : '☆'; approval.setAttribute('aria-pressed', String(movie.approved));
+      const updateApprovalLabel = () => { const label = movie.approved ? 'Remove from Baby profile' : 'Add to Baby profile'; approval.dataset.tooltip = label; approval.setAttribute('aria-label', label); };
+      updateApprovalLabel();
+      approval.onclick = async () => { try { await api(`/api/movies/${movie.id}/approval`, {approved: !movie.approved}); movie.approved = !movie.approved; approval.textContent = movie.approved ? '★' : '☆'; approval.setAttribute('aria-pressed', String(movie.approved)); updateApprovalLabel(); } catch(error) { report(error); } };
+      imageActions.append(approval);
+      const rename = document.createElement('button'); rename.className = 'icon-button'; rename.textContent = '✎'; rename.dataset.tooltip = 'Rename movie'; rename.setAttribute('aria-label', `Rename ${movie.title}`);
       rename.onclick = async () => {
         const name = await askName('Rename movie', movie.title);
         if (name === null || name.trim() === movie.title) return;
@@ -103,12 +129,11 @@ function render() {
           movie.title = name.trim(); render(); $('status').textContent = `Renamed to ${movie.title}.`;
         } catch (error) { report(error); }
       };
-      card.append(rename);
+      imageActions.append(rename);
     }
-    const imageActions = document.createElement('div'); imageActions.className = 'image-actions';
-    const choose = document.createElement('button'); choose.textContent = 'Add / change image';
+    const choose = document.createElement('button'); choose.className = 'icon-button'; choose.textContent = '▧'; choose.dataset.tooltip = 'Add or change image';
     choose.setAttribute('aria-label', `Add or change image for ${movie.title}`);
-    const automatic = document.createElement('button'); automatic.textContent = 'Use automatic image';
+    const automatic = document.createElement('button'); automatic.className = 'icon-button'; automatic.textContent = '↻'; automatic.dataset.tooltip = 'Use automatic image';
     automatic.setAttribute('aria-label', `Use automatic image for ${movie.title}`);
     const picker = document.createElement('input'); picker.type = 'file'; picker.accept = 'image/jpeg,image/png,image/webp'; picker.hidden = true;
     choose.onclick = () => picker.click();
@@ -137,6 +162,18 @@ function render() {
     $('movies').append(card);
   }
 }
+function formatTime(seconds) {
+  const total = Math.max(0, Math.floor(seconds)); const hours = Math.floor(total / 3600); const minutes = Math.floor(total % 3600 / 60); const rest = total % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2,'0')}:${String(rest).padStart(2,'0')}` : `${minutes}:${String(rest).padStart(2,'0')}`;
+}
+async function saveProgress(force = false) {
+  const video = $('video'); const movie = currentMovie;
+  if (!movie || !Number.isFinite(video.duration) || video.duration <= 0 || !Number.isFinite(video.currentTime)) return;
+  if (!force && Math.abs(video.currentTime - lastSavedAt) < 10) return;
+  lastSavedAt = video.currentTime; movie.position = video.currentTime; movie.duration = video.duration;
+  try { await api(`/api/movies/${movie.id}/progress`, {position: video.ended ? 0 : video.currentTime, duration: video.duration}); if (video.ended) movie.position = null; }
+  catch (error) { if (force) report(error); }
+}
 async function leaveParents() { await api('/api/logout', {}); parent = false; collection = []; $('movies').replaceChildren(); $('search').value = ''; }
 $('baby').onclick = async () => { try { await leaveParents(); await load(); } catch(error) { report(error); } };
 $('parents').onclick = async () => { try { const session = await api('/api/session'); if (session.parent) { parent = true; await load(); } else { show('login'); $('password').focus(); } } catch(error) { report(error); } };
@@ -145,8 +182,13 @@ $('cancel').onclick = () => { show('profiles'); $('parents').focus(); };
 $('home').onclick = async () => { try { await leaveParents(); show('profiles'); loadStorage(); $('baby').focus(); } catch(error) { report(error); } };
 $('scan').onclick = async () => { $('scan').disabled = true; try { const count = await api('/api/scan', {}); await load(); $('status').textContent = `Library updated: ${count} movies.`; } catch(error) { report(error); } finally { $('scan').disabled = false; } };
 $('search').oninput = render;
-$('close-player').onclick = () => $('player').close();
-$('player').addEventListener('close', () => { $('video').pause(); $('video').removeAttribute('src'); $('video').load(); returnFocus?.focus(); });
+$('close-player').onclick = async () => { await saveProgress(true); $('player').close(); };
+$('player').addEventListener('close', () => { const video = $('video'); video.pause(); video.removeAttribute('src'); video.load(); currentMovie = null; returnFocus?.focus(); render(); });
+$('video').addEventListener('loadedmetadata', () => { const position = Number(currentMovie?.position) || 0; if (position > 1 && position < $('video').duration - 15) $('video').currentTime = position; });
+$('video').addEventListener('timeupdate', () => saveProgress());
+$('video').addEventListener('pause', () => saveProgress(true));
+$('video').addEventListener('ended', () => saveProgress(true));
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveProgress(true); });
 $('video').onerror = () => { $('playback-error').hidden = false; };
 // Arrow keys move between controls for TV remotes; native video and inputs retain their keys.
 document.addEventListener('keydown', event => {
