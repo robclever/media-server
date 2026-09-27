@@ -5,7 +5,7 @@
 - `src/`: Rust server, persistence, authorization, and filesystem behavior.
 - `web/`: dependency-free browser interface embedded into the executable.
 - `tests/`: Rust HTTP integration tests and the Playwright browser test.
-- `scripts/`: smoke checks, isolated container checks, browser fixture server, and Pi deployment.
+- `scripts/`: smoke checks, isolated container checks, browser fixture server, Pi deployment, and the self-contained `ripping/` tools.
 - `.github/workflows/ci.yml`: Rust, container, browser, and release-image jobs.
 - `docs/`: architecture, API, and development references.
 
@@ -33,6 +33,7 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
 npm run test:browser
 python3 -m unittest discover -s scripts -p 'test_deploy_pi.py'
+python3 -m unittest discover -s scripts/ripping -p 'test_*.py'
 ```
 
 The browser test requires FFmpeg and a Playwright Chromium installation. It starts an isolated server on port 18084 and deletes its temporary data afterward.
