@@ -68,14 +68,20 @@ Photo routes require no password. This is intentional for the trusted-home-netwo
 
 ## Storage
 
-`GET /api/storage` returns total and available bytes across the application data directory, photo directory, and movie roots. Filesystem device IDs prevent double-counting multiple paths on the same disk.
+`GET /api/storage` separates the size of files managed by Custom Plex from the capacity of their underlying filesystems. `managed` is the sum of `locations`; it does not include unrelated files elsewhere on the disks. `total` and `available` describe whole filesystems, with device IDs preventing double-counting when movies and photos share a disk.
 
 ```json
 {
+  "managed": 125000,
   "total": 1000000,
   "available": 400000,
+  "locations": [
+    {"name":"App data","bytes":5000},
+    {"name":"Photos","bytes":20000},
+    {"name":"Movies: default","bytes":100000}
+  ],
   "volumes": [
-    {"name":"App data","total":1000000,"available":400000}
+    {"name":"App data + Photos + Movies: default","total":1000000,"available":400000}
   ]
 }
 ```

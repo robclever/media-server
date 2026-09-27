@@ -57,7 +57,7 @@ For a TV on the same home network, use `http://<this-macs-lan-ip>:8080`, not `lo
 - Compact icon controls with hover and keyboard-focus tooltips on movie and photo-album cards.
 - Persistent descriptions for photo albums and individual photos.
 - Shared movie resume positions that survive restarts and deployments.
-- Home-profile storage usage across the database, movie locations, and photo storage, with shared filesystems counted once.
+- Home-profile storage reporting that separates actual Custom Plex file sizes from whole-device capacity, with shared filesystems counted once.
 - Baby sees and streams only titles explicitly approved by a parent.
 - Parents can browse everything, scan the library, and change Baby approvals.
 - Argon2 password hashing, eight-hour sessions, logout, password reset, and login throttling.

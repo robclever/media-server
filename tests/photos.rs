@@ -47,7 +47,8 @@ fn setup() -> (tempfile::TempDir, Router) {
 
 #[tokio::test]
 async fn home_storage_reports_media_capacity_without_double_counting_mounts() {
-    let (_tmp, app) = setup();
+    let (tmp, app) = setup();
+    std::fs::write(tmp.path().join("media/example.mp4"), vec![0_u8; 1234]).unwrap();
     let response = send(&app, "GET", "/api/storage", vec![], false).await;
     assert_eq!(response.status(), StatusCode::OK);
     let storage = json(response).await;
@@ -57,6 +58,20 @@ async fn home_storage_reports_media_capacity_without_double_counting_mounts() {
     let volumes = storage["volumes"].as_array().unwrap();
     assert!(!volumes.is_empty());
     assert!(volumes.len() <= 3);
+    let locations = storage["locations"].as_array().unwrap();
+    assert_eq!(locations.len(), 3);
+    let movies = locations
+        .iter()
+        .find(|location| location["name"] == "Movies: default")
+        .unwrap();
+    assert_eq!(movies["bytes"], 1234);
+    assert_eq!(
+        storage["managed"].as_u64().unwrap(),
+        locations
+            .iter()
+            .map(|location| location["bytes"].as_u64().unwrap())
+            .sum::<u64>()
+    );
 }
 #[tokio::test]
 async fn anonymous_albums_keep_originals_on_external_storage_and_survive_restart() {

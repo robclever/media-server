@@ -75,6 +75,7 @@ assert request(original_url) == png
 assert request(f"/api/photos/{photo['id']}/thumbnail").startswith(b'\xff\xd8')
 storage = json.loads(request('/api/storage'))
 assert storage['total'] > 0 and storage['available'] <= storage['total'] and storage['volumes']
+assert storage['managed'] >= 0 and storage['locations']
 
 subprocess.run(['docker', 'compose', 'up', '-d', '--no-build', '--pull', 'never', '--force-recreate', '--wait'], check=True)
 assert request(original_url) == png, 'Photo original did not persist'

@@ -80,17 +80,18 @@ function formatBytes(bytes) {
   while (bytes >= 1024 && unit < units.length - 1) { bytes /= 1024; unit++; }
   return `${bytes.toFixed(unit < 2 ? 0 : 1)} ${units[unit]}`;
 }
-/** Loads aggregate filesystem capacity without blocking the rest of the home screen. */
+/** Loads managed-file sizes and whole-filesystem capacity without blocking the home screen. */
 async function loadStorage() {
   try {
     const storage = await api('/api/storage');
     const used = storage.total - storage.available;
     const percent = storage.total ? Math.round(used / storage.total * 100) : 0;
-    const heading = document.createElement('strong'); heading.textContent = `Media storage · ${percent}% used`;
-    const meter = document.createElement('progress'); meter.max = storage.total || 1; meter.value = used; meter.setAttribute('aria-label', 'Media storage used');
-    const summary = document.createElement('p'); summary.textContent = `${formatBytes(used)} used · ${formatBytes(storage.available)} available · ${formatBytes(storage.total)} total`;
-    const details = document.createElement('small'); details.textContent = storage.volumes.map(volume => `${volume.name}: ${formatBytes(volume.total - volume.available)} of ${formatBytes(volume.total)}`).join(' · ');
-    $('storage').replaceChildren(heading, meter, summary, details);
+    const heading = document.createElement('strong'); heading.textContent = `Custom Plex files · ${formatBytes(storage.managed)}`;
+    const managed = document.createElement('p'); managed.textContent = storage.locations.map(location => `${location.name}: ${formatBytes(location.bytes)}`).join(' · ');
+    const meter = document.createElement('progress'); meter.max = storage.total || 1; meter.value = used; meter.setAttribute('aria-label', 'Configured storage devices used by all files');
+    const capacity = document.createElement('p'); capacity.textContent = `Configured devices · ${percent}% full · ${formatBytes(storage.available)} available`;
+    const details = document.createElement('small'); details.textContent = `Device usage includes files outside Custom Plex. ${storage.volumes.map(volume => `${volume.name}: ${formatBytes(volume.available)} free of ${formatBytes(volume.total)}`).join(' · ')}`;
+    $('storage').replaceChildren(heading, managed, meter, capacity, details);
   } catch (_) { $('storage').replaceChildren(Object.assign(document.createElement('p'), {textContent:'Storage usage is unavailable.'})); }
 }
 /** Loads the movie list for the selected profile and opens the library screen. */
