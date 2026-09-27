@@ -5,3 +5,29 @@
 .cover img{display:block;width:100%;height:190px;object-fit:contain;background:#101919}.image-actions{display:flex;flex-direction:column;gap:.5rem;margin:0 1rem 1rem}.image-actions button{font-size:.8rem;padding:.6rem}button:disabled{opacity:.55;cursor:wait}
 
 .profiles{flex-wrap:wrap}.photo-avatar{background:#cfb99d;color:#493f32}.album-card{width:100%;padding:0;overflow:hidden;text-align:left}.album-open{display:block;width:100%;padding:0;border:0;border-radius:0;text-align:left;background:transparent}.album-card h2,.album-card p{margin:1rem}.album-card img{width:100%;height:190px;object-fit:cover;display:block}.album-placeholder{height:190px;display:grid;place-items:center;font-size:3rem;color:#e8d7a1;background:#34483b}.photo-tile{padding:0;overflow:hidden;background:#192c25}.photo-tile img{display:block;width:100%;height:200px;object-fit:contain}.photo-tile span{display:block;padding:.75rem;overflow-wrap:anywhere}#full-photo{display:block;max-width:100%;height:65vh;object-fit:contain;margin:auto}.photo-navigation{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:1rem 0}.photo-navigation a{color:#eac77c}#upload-progress{white-space:pre-line}.icon-actions{display:flex;justify-content:center;gap:.75rem;padding:1rem;border-top:1px solid #ffffff18}.icon-actions button{display:flex;align-items:center;gap:.45rem;font-size:1.1rem}.icon-actions button span{font-size:.8rem}.icon-actions.compact{justify-content:flex-end;padding:.65rem}.icon-actions.compact button{min-height:40px;padding:.5rem .7rem}.danger{color:#ffd2cb;border-color:#9e5c54}.menu-list{display:grid;gap:.7rem}.menu-list button{text-align:left}.dialog-actions{display:flex;justify-content:flex-end;gap:.75rem}.storage{max-width:880px;margin:3rem auto 0;padding:1.25rem;text-align:left;background:#182823;border:1px solid #ffffff1a;border-radius:15px}.storage progress{width:100%;height:1rem;margin:.75rem 0;accent-color:#d7be83}.storage p{margin:.25rem 0}.storage small{display:block;color:#91a69a;overflow-wrap:anywhere}
+
+.home-slideshow { margin-top: 2rem; }
+.slideshow-selection { display: flex; align-items: center; gap: .6rem; padding: .75rem; }
+.slideshow-selection input { width: auto; margin: 0; }
+#slideshow-player { width: min(1100px, 95vw); max-height: 95dvh; }
+#slideshow-screen { display: flex; flex-direction: column; }
+#slide-image { width: 100%; min-height: 0; height: 55dvh; object-fit: contain; background: #000; }
+#slide-image[hidden] { display: none; }
+#slide-caption { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12dvh; overflow: auto; }
+.slideshow-controls { display: flex; flex-wrap: wrap; gap: .5rem; }
+#slide-exit-fullscreen { display: none; }
+#slideshow-screen:fullscreen { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; padding: 0; margin: 0; background: #000; border: 0; border-radius: 0; overflow: hidden; }
+#slideshow-screen:fullscreen #slide-image { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; object-fit: contain; }
+#slideshow-screen:fullscreen .player-heading,
+#slideshow-screen:fullscreen .slideshow-controls,
+#slideshow-screen:fullscreen .slideshow-settings,
+#slideshow-screen:fullscreen #slide-caption,
+#slideshow-screen:fullscreen #slide-status { display: none; }
+#slideshow-screen:fullscreen #slide-exit-fullscreen { display: grid; place-items: center; position: absolute; top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); z-index: 1; width: 44px; height: 44px; min-height: 0; padding: 0; border: 1px solid #ffffff80; border-radius: 50%; background: #0008; color: #fff; font-size: 30px; line-height: 1; }
+#slideshow-screen:fullscreen #slide-image[hidden] ~ #slide-status { display: block; margin: auto; max-width: 65ch; padding: 3rem; color: #fff; }
+
+.slideshow-settings { display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; margin: 0 0 1rem; padding: .75rem; border: 1px solid #607165; border-radius: 10px; }
+.slideshow-settings label { display: flex; flex-direction: column; gap: .4rem; }
+.slideshow-settings select { font: inherit; color: #fff; background: #172621; border: 1px solid #607165; border-radius: 6px; padding: .5rem; }
+.slideshow-settings small { flex-basis: 100%; }
+.slideshow-settings select:focus-visible { outline: 3px solid #f5ce79; }

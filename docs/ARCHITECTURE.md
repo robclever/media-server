@@ -17,6 +17,7 @@ The application assumes a trusted home network. The running server does not prov
 | Photo albums | `src/photos.rs` | Manage album/photo metadata, validate uploads, create previews, move/rename/delete items, and serve stored images. |
 | Storage reporting | `src/storage.rs` | Report filesystem capacity while counting each underlying filesystem once. |
 | Movie interface | `web/app.js` | Profiles, login, movie cards, covers, playback, progress events, storage meter, and shared dialogs. |
+| Slideshow interface | `web/slideshow.js` | Homepage dialog, fresh playlist loading, five-second looping, pause/navigation, timer cleanup, and native fullscreen. |
 | Photo interface | `web/photos.js` | Album browsing, uploads, photo preview, descriptions, renaming, moving, and deletion. |
 | HTML and styles | `web/index.html`, `web/style.css`, `web/controls.css` | Accessible page structure, dialogs, responsive layout, compact controls, and tooltips. |
 
@@ -241,7 +242,7 @@ Image decoding and filesystem-heavy work move to blocking worker threads. Video 
 | `movies` | Source, relative path, title, approval, and presence | `(source, path)` |
 | `covers` | Uploaded or generated JPEG plus source fingerprint | Movie ID |
 | `playback_progress` | Shared position, duration, and update time | Movie ID |
-| `albums` | Album name, description, and recent-use ordering | Album ID |
+| `albums` | Album name, description, slideshow inclusion, and recent-use ordering | Album ID |
 | `photos` | Album membership, title, description, storage token, and extension | Photo ID |
 
 Schema changes are additive except for the historical one-time movie-table migration that introduced source names. Startup enables SQLite foreign keys and applies migrations before serving requests.
@@ -265,3 +266,13 @@ Failed login attempts are limited to ten per rolling minute for the process. Res
 Docker runs the process as UID/GID `10001`, with a read-only root filesystem and persistent bind mounts. `scripts/deploy_pi.py` builds an ARM64 image locally, streams the image and source to the Pi, and invokes `deploy_pi_remote.py`. The remote phase validates mounts, checks photo-directory writes as the container identity, stops the service, creates a consistent database backup, loads the image, recreates the service, and waits for health. It retains the previous image for rollback.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for verification commands and [API.md](API.md) for the HTTP contract.
+
+### Slideshow persistence and lifecycle
+
+Photo initialization adds `albums.slideshow INTEGER NOT NULL DEFAULT 0` if absent, preserving existing metadata and leaving albums unselected. Selection updates use the existing mutation-header middleware and remain password-free. The playlist joins selected albums to current photo membership, ordered by album ID and photo ID, without touching recent-use timestamps. It returns metadata only; the browser loads one existing preview URL at a time.
+
+The homepage controller loads a fresh playlist on each opening, discards responses after close, and keeps at most one automatic-advance timer. Pause, tab visibility, navigation, and close reset or clear it. Closing removes the image source, exits fullscreen when applicable, and restores focus. Fullscreen failures remain usable in the dialog.
+
+Fullscreen places the image across the entire viewport with `object-fit: contain`, hides the dialog heading/captions/toolbar, and overlays a single accessible × exit button. Native fullscreen change events move focus between that exit button and the windowed fullscreen control.
+
+Slideshow timing/effect preferences are validated against the UI choices and stored in browser local storage (`slideshow-options`), with 5 seconds, no effect, and a 600 ms transition as defaults. Storage failure falls back to in-memory settings. The timer uses the selected interval; incoming loaded images animate through the Web Animations API. Replacing an image, changing effect settings, or closing cancels the prior animation. Reduced-motion preferences suppress effects. No server schema or endpoint changes are required.

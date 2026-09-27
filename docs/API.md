@@ -51,10 +51,12 @@ Photo routes require no password. This is intentional for the trusted-home-netwo
 
 | Method | Path | Request or response |
 | --- | --- | --- |
-| `GET` | `/api/albums` | Albums ordered by recent use: `id`, `name`, `description`, `count`, and `cover_id`. |
+| `GET` | `/api/albums` | Albums ordered by recent use: `id`, `name`, `description`, `count`, `cover_id`, and boolean `slideshow`. |
 | `POST` | `/api/albums` | `{"name":"Album"}`; returns the created album with `201 Created`. |
 | `DELETE` | `/api/albums/{id}` | Permanently deletes the album and every stored photo variant. |
 | `POST` | `/api/albums/{id}/name` | `{"name":"New name"}`. |
+| `GET` | `/api/slideshow` | Selected albums’ photos as `id`, `name`, `description`, ordered by album ID then photo ID. Empty selections return `[]`; does not update recent use. |
+| `POST` | `/api/albums/{id}/slideshow` | `{"slideshow":true}` or `false`; returns `204`, `404` for a missing album, or `422` for missing/non-boolean fields. Requires the mutation header; no Parents session. |
 | `POST` | `/api/albums/{id}/description` | `{"description":"..."}`; up to 2,000 characters. Empty clears it. |
 | `GET` | `/api/albums/{id}/photos` | Photo records with `id`, `name`, and `description`. Opening the list marks the album recently used. |
 | `POST` | `/api/albums/{id}/photos?name=...` | Raw JPEG, PNG, or WebP body. Maximum 24 MiB and 8192 pixels per side. Returns `201 Created`. |

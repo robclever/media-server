@@ -56,6 +56,7 @@ For a TV on the same home network, use `http://<this-macs-lan-ip>:8080`, not `lo
 - Rename movie titles, albums, and photos; move photos between albums; and delete photos or albums with confirmation.
 - Compact icon controls with hover and keyboard-focus tooltips on movie and photo-album cards.
 - Persistent descriptions for photo albums and individual photos.
+- Homepage slideshow from selected albums, with automatic playback, pause, navigation, and fullscreen.
 - Shared movie resume positions that survive restarts and deployments.
 - Home-profile storage reporting that separates actual Custom Plex file sizes from whole-device capacity, with shared filesystems counted once.
 - Baby sees and streams only titles explicitly approved by a parent.
@@ -223,6 +224,19 @@ Use the star icon on a movie card to add it to Baby, then switch to Baby to chec
 - **Replace at the same path:** the existing approval remains. Revoke Baby approval before replacing content if it should be reviewed again.
 - **Remove:** move the file outside the media folder or delete it, then scan. Its card disappears. Stored database entries are retained, so reintroducing the exact same path restores its previous approval.
 - **Missing after a scan:** check that the copy completed, its final extension is supported, it is inside the configured folder, it is not a symlink, and the container can read it. Then check whether you are viewing Baby or Parents.
+
+## Homepage slideshow
+
+1. Open **Photo Album** and check **Use in slideshow** on each album you want to include. Choices are shared across devices and survive restarts and deployments. New and existing albums start unselected.
+2. Return with **Switch profile**, then choose **Play slideshow** on the homepage.
+3. Photos advance every five seconds by default and loop in album creation order, then photo upload order. Use **Pause slideshow** / **Resume slideshow**, **Previous slide**, **Next slide**, or the left/right arrow keys.
+4. Select **Enter fullscreen** for a screen-filling player. Fullscreen uses the entire screen for the photo, hides headings, captions, and playback buttons, and keeps a small **×** in the upper-right corner to return to the window. Photos retain their proportions, with black space where necessary. Arrow keys still navigate and Space pauses/resumes. **Close slideshow** stops playback and returns focus to the homepage. Escape uses the browser's normal fullscreen/dialog exit behavior.
+
+The player uses browsing previews (up to 1600 pixels) and displays photo names and descriptions. If fullscreen is unsupported or denied, playback remains available in the dialog. Empty selections show instructions; empty albums add no slides. A missing photo shows an error and the player can continue to the next slide. Automatic advances pause while the browser tab is hidden.
+
+**Slideshow options** in the windowed player let you choose 3, 5, 10, 15, or 30 seconds per photo; None, Fade, Slide, or Zoom transitions; and a transition duration of 0.3, 0.6, 1, or 2 seconds. Time per photo sets the interval between advances; transition duration controls the incoming photo animation within that interval. Choices are saved in the current browser, independently of other devices. Exit fullscreen with × to adjust them. Reduced-motion browser preferences disable animation while keeping automatic playback.
+
+Each opening loads the current selection and album contents. Reopen the slideshow to pick up changes made on another device. Selection and playback are password-free, like the rest of Photo Album.
 
 ## Movie resume positions
 
@@ -790,6 +804,12 @@ To restore the default data path, stop the service, move the current `data` dire
 | `.local` address fails | Use the Pi IP address. |
 
 ## Validation status
+
+Slideshow options update (September 27, 2026): all four browser tests pass, including configurable timing, animation effects and duration, browser persistence, and reduced motion. JavaScript syntax and diff checks passed. The Pi deployment is healthy and live Chromium checks passed for the new selectors and fullscreen behavior. Backup: `/home/rob/custom-plex-backups/20260927T175414Z`; rollback image: `custom-plex:before-20260927t175414z`.
+
+Fullscreen follow-up (September 27, 2026): the photo now occupies the entire fullscreen viewport, with headings, captions, and toolbar hidden and a single × exit control overlaid at the upper right. All three browser tests pass, including viewport bounds, hidden controls, keyboard pause, and exit/focus behavior. The Pi is running the update and is healthy; live Chromium verification of the × control and return to the open slideshow passed. Deployment backup: `/home/rob/custom-plex-backups/20260927T070140Z`.
+
+Slideshow update (September 27, 2026): all 19 Rust integration tests and all three Playwright browser tests pass. Coverage includes selection defaults and migration, persistence after restart, validation, playlist membership after moves/deletions, real preview decoding, timed looping, pause/resume, keyboard navigation, native fullscreen, closing directly from fullscreen with focus restoration, and failure handling. Formatting, Clippy with warnings denied, warning-free rustdoc generation, and five deployment-script tests passed. The corrected update was deployed to the physical Pi; container health and live Chromium checks passed for the homepage, playlist endpoint, native fullscreen, close/focus behavior, and album selection controls. Live verification did not change household albums or selections. Actual TV-browser playback remains device-specific and has not been checked. Latest deployment backup: `/home/rob/custom-plex-backups/20260927T065455Z`; rollback image: `custom-plex:before-20260927t065455z`. The pre-feature backup is `/home/rob/custom-plex-backups/20260927T065100Z`, with image `custom-plex:before-20260927t065100z`.
 
 Compact-controls, descriptions, and resume update (September 26–27, 2026): all 17 Rust integration tests pass (seven photo/storage scenarios and ten movie/auth/streaming scenarios), including the added boundary checks documented above. Formatting, Clippy with warnings denied, JavaScript syntax checks, Python script compilation, and the repository diff check pass. The Playwright browser test passes locally in Chromium and covers compact movie/album/photo icons, hover tooltips, interface-driven descriptions and photo upload, playback event saving, and resume seeking against disposable data; GitHub Actions runs the same test. The isolated container check also verifies description and resume persistence after container recreation, but it was not rerun locally for this update. The physical Pi was deployed successfully on September 27, 2026, including the follow-up that exposes an always-visible description field on each individual photo preview. Docker and LAN health checks passed, and the deployed page contains the new **Photo description** field and save control. The latest deployment backup is `/home/rob/custom-plex-backups/20260927T011922Z`, and the rollback image is `custom-plex:before-20260927t011922z`. The existing password, media mounts, and external photo storage were retained.
 
