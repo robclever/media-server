@@ -534,7 +534,7 @@ async fn deleting_an_album_removes_all_photo_files() {
 async fn slideshow_selection_is_validated_persistent_and_tracks_album_contents() {
     let (tmp, app) = setup();
     for name in ["Selected", "Excluded", "Empty"] {
-        let album = json(
+        assert_eq!(
             send(
                 &app,
                 "POST",
@@ -542,11 +542,15 @@ async fn slideshow_selection_is_validated_persistent_and_tracks_album_contents()
                 format!(r#"{{"name":"{name}"}}"#).into_bytes(),
                 true,
             )
-            .await,
-        )
-        .await;
-        assert_eq!(album["slideshow"], false);
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
     }
+    assert_eq!(
+        json(send(&app, "GET", "/api/slideshow/albums", vec![], false).await).await,
+        serde_json::json!([])
+    );
     for id in [1, 2] {
         assert_eq!(
             send(
@@ -618,6 +622,10 @@ async fn slideshow_selection_is_validated_persistent_and_tracks_album_contents()
             StatusCode::NO_CONTENT
         );
     }
+    assert_eq!(
+        json(send(&app, "GET", "/api/slideshow/albums", vec![], false).await).await,
+        serde_json::json!([1, 3])
+    );
     drop(app);
     let app = router(
         App::open(tmp.path().join("media"), tmp.path().join("data"), false)
@@ -626,6 +634,10 @@ async fn slideshow_selection_is_validated_persistent_and_tracks_album_contents()
             .unwrap(),
     );
     let playlist = json(send(&app, "GET", "/api/slideshow", vec![], false).await).await;
+    assert_eq!(
+        json(send(&app, "GET", "/api/slideshow/albums", vec![], false).await).await,
+        serde_json::json!([1, 3])
+    );
     assert_eq!(playlist.as_array().unwrap().len(), 1);
     assert_eq!(playlist[0]["id"], 1);
     assert_eq!(
@@ -664,6 +676,10 @@ async fn slideshow_selection_is_validated_persistent_and_tracks_album_contents()
     assert_eq!(
         json(send(&app, "GET", "/api/slideshow", vec![], false).await).await,
         serde_json::json!([])
+    );
+    assert_eq!(
+        json(send(&app, "GET", "/api/slideshow/albums", vec![], false).await).await,
+        serde_json::json!([3])
     );
     send(&app, "POST", "/api/albums/1/slideshow", setting, true).await;
     assert_eq!(
@@ -712,7 +728,11 @@ async fn existing_albums_migrate_to_unselected_without_losing_metadata() {
     let albums = json(send(&app, "GET", "/api/albums", vec![], false).await).await;
     assert_eq!(albums[0]["name"], "Existing album");
     assert_eq!(albums[0]["id"], 1);
-    assert_eq!(albums[0]["slideshow"], false);
+    assert!(albums[0].get("slideshow").is_none());
+    assert_eq!(
+        json(send(&app, "GET", "/api/slideshow/albums", vec![], false).await).await,
+        serde_json::json!([])
+    );
 }
 
 #[tokio::test]

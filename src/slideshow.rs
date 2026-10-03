@@ -1,12 +1,32 @@
-//! Shared slideshow presets; album choices do not change the default slideshow selection.
+//! Slideshow selection, playlists, presets, and the browser controller asset.
 use crate::{ApiResult, App, internal};
 use axum::{
     Json, Router,
-    extract::{Path, State},
-    http::StatusCode,
+    extract::{Path, Query, State},
+    http::{StatusCode, header},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
+
+#[derive(Serialize)]
+/// Photo metadata used by the slideshow player.
+struct Slide {
+    id: i64,
+    name: String,
+    description: String,
+}
+
+#[derive(Deserialize)]
+/// Explicit album inclusion setting; omitted or non-boolean values are rejected.
+struct SelectionSetting {
+    slideshow: bool,
+}
+
+#[derive(Deserialize)]
+/// Optional explicit album selection; an empty value returns no photos.
+struct AlbumQuery {
+    albums: Option<String>,
+}
 
 #[derive(Deserialize, Serialize)]
 /// Validated playback settings stored with a named preset.
@@ -67,10 +87,95 @@ fn validate(input: &mut Input) -> ApiResult<()> {
     }
     Ok(())
 }
-/// Creates the additive preset table during application startup.
+/// Creates and migrates all slideshow-owned persistence.
 pub fn initialize(db: &rusqlite::Connection) -> anyhow::Result<()> {
+    let columns = db
+        .prepare("PRAGMA table_info(albums)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if !columns.iter().any(|name| name == "slideshow") {
+        db.execute(
+            "ALTER TABLE albums ADD COLUMN slideshow INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
     db.execute("CREATE TABLE IF NOT EXISTS slideshow_presets (id INTEGER PRIMARY KEY, content TEXT NOT NULL)", [])?;
     Ok(())
+}
+
+/// Lists album IDs included by default without exposing slideshow state through the photo API.
+async fn selected_albums(State(app): State<App>) -> ApiResult<Json<Vec<i64>>> {
+    let db = app.db.lock().unwrap();
+    let mut stmt = db
+        .prepare("SELECT id FROM albums WHERE slideshow=1 ORDER BY id")
+        .map_err(internal)?;
+    let rows = stmt.query_map([], |row| row.get(0)).map_err(internal)?;
+    Ok(Json(rows.collect::<Result<Vec<_>, _>>().map_err(internal)?))
+}
+
+/// Saves password-free album inclusion, protected by the mutation middleware.
+async fn set_selection(
+    State(app): State<App>,
+    Path(id): Path<i64>,
+    Json(input): Json<SelectionSetting>,
+) -> ApiResult<StatusCode> {
+    let changed = app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE albums SET slideshow=?1 WHERE id=?2",
+            rusqlite::params![input.slideshow, id],
+        )
+        .map_err(internal)?;
+    if changed == 0 {
+        Err(StatusCode::NOT_FOUND)
+    } else {
+        Ok(StatusCode::NO_CONTENT)
+    }
+}
+
+/// Loads either the default selection or explicitly requested album IDs.
+/// Results are ordered by album/photo ID without changing recent use; moves
+/// and deletions are reflected on the next request.
+async fn playlist(
+    State(app): State<App>,
+    Query(query): Query<AlbumQuery>,
+) -> ApiResult<Json<Vec<Slide>>> {
+    let db = app.db.lock().unwrap();
+    let ids = query
+        .albums
+        .as_ref()
+        .map(|value| {
+            if value.is_empty() {
+                return Ok(Vec::new());
+            }
+            let ids = value
+                .split(',')
+                .map(|id| id.parse::<i64>().map_err(|_| StatusCode::BAD_REQUEST))
+                .collect::<Result<Vec<_>, _>>()?;
+            if ids.len() > 500 || ids.iter().any(|id| *id <= 0) {
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            Ok(ids)
+        })
+        .transpose()?;
+    let condition = if let Some(ids) = &ids {
+        format!("a.id IN ({})", vec!["?"; ids.len()].join(","))
+    } else {
+        "a.slideshow=1".to_owned()
+    };
+    let mut stmt = db.prepare(&format!("SELECT p.id,p.name,p.description FROM photos p JOIN albums a ON a.id=p.album_id WHERE {condition} ORDER BY a.id,p.id")).map_err(internal)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(ids.iter().flatten()), |row| {
+            Ok(Slide {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+            })
+        })
+        .map_err(internal)?;
+    Ok(Json(rows.collect::<Result<Vec<_>, _>>().map_err(internal)?))
 }
 /// Lists shared presets, including references to albums removed since saving.
 async fn list(State(app): State<App>) -> ApiResult<Json<Vec<Preset>>> {
@@ -154,6 +259,18 @@ async fn delete(State(app): State<App>, Path(id): Path<i64>) -> ApiResult<Status
 /// Password-free routes using the application's existing mutation protection.
 pub fn routes() -> Router<App> {
     Router::new()
+        .route(
+            "/slideshow.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../web/slideshow.js"),
+                )
+            }),
+        )
+        .route("/api/slideshow", get(playlist))
+        .route("/api/slideshow/albums", get(selected_albums))
+        .route("/api/albums/{id}/slideshow", post(set_selection))
         .route("/api/slideshow/presets", get(list).post(create))
         .route("/api/slideshow/presets/{id}", post(update).delete(delete))
 }

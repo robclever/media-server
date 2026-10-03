@@ -372,8 +372,8 @@ test('shuffle, fullscreen captions, and shared presets work through browser cont
       await other.getByRole('button', { name: 'Delete preset', exact: true }).click();
       await expect(other.locator('#slide-setup-status')).toContainText('Preset deleted');
     } finally { await second.close(); }
-    const albums = await (await request.get('/api/albums')).json();
-    expect(albums.find(a => a.id === albumId).slideshow).toBe(false);
+    const selected = await (await request.get('/api/slideshow/albums')).json();
+    expect(selected).not.toContain(albumId);
   } finally {
     if (presetId) await request.delete(`/api/slideshow/presets/${presetId}`, { headers: requestHeaders });
     if (albumId) await request.delete(`/api/albums/${albumId}`, { headers: requestHeaders });

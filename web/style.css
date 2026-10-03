@@ -55,3 +55,14 @@ body.slideshow-open { overflow: hidden; }
   .slideshow-controls { bottom: -.75rem; margin: 0 -.75rem -.75rem; padding: .65rem .75rem .75rem; }
   .slideshow-controls button { flex: 1 1 145px; padding: .65rem .8rem; }
 }
+
+/* One scrollable row keeps the alphabet compact on phones and TV screens. */
+.alphabet-heading{display:flex;justify-content:space-between;gap:1rem;color:#b0c1b6;font-size:.85rem;margin-top:.5rem}
+.alphabet-heading small{color:#91a69a}
+.movie-alphabet{display:flex;gap:.35rem;overflow-x:auto;padding:.65rem .5rem .85rem;scroll-padding-inline:.5rem;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:#607165 #172621;border-bottom:1px solid #ffffff18}
+.movie-alphabet button{flex:0 0 auto;min-width:44px;min-height:44px;padding:.5rem .65rem;border-color:transparent;background:transparent;color:#b0c1b6;font-weight:600}
+.movie-alphabet button:hover{background:#2b4337;color:#fff}
+.movie-alphabet button[aria-pressed="true"]{background:#eac77c;color:#233d33;border-color:#eac77c}
+.movie-alphabet button:focus-visible{outline-offset:1px;outline-width:3px}
+.movie-count{font-size:.85rem;margin:.8rem 0 0}
+#movies{margin-top:1rem}

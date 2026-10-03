@@ -125,9 +125,11 @@
   async function loadSetup(version) {
     $('slide-setup-status').textContent = 'Loading albums and presets…';
     try {
-      const [available, saved] = await Promise.all([api('/api/albums'), api('/api/slideshow/presets')]);
+      const [available, selected, saved] = await Promise.all([
+        api('/api/albums'), api('/api/slideshow/albums'), api('/api/slideshow/presets'),
+      ]);
       if (version !== generation || !dialog.open) return;
-      albums = available; presets = saved; selectedAlbums = albums.filter(a => a.slideshow).map(a => a.id);
+      albums = available; presets = saved; selectedAlbums = selected;
       renderAlbums(); renderPresets(); $('slide-setup-status').textContent = '';
     } catch (error) { if (version === generation) $('slide-setup-status').textContent = error.message; }
   }

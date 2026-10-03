@@ -38,7 +38,6 @@ pub struct Album {
     name: String,
     count: i64,
     cover_id: Option<i64>,
-    slideshow: bool,
     description: String,
 }
 #[derive(Serialize)]
@@ -90,7 +89,7 @@ fn clean_name(value: &str, maximum: usize) -> ApiResult<&str> {
 /// Lists albums by recent use with counts, covers, and descriptions.
 pub async fn albums(State(app): State<App>) -> ApiResult<Json<Vec<Album>>> {
     let db = app.db.lock().unwrap();
-    let mut stmt = db.prepare("SELECT a.id,a.name,COUNT(p.id),MIN(p.id),a.description,a.slideshow FROM albums a LEFT JOIN photos p ON p.album_id=a.id GROUP BY a.id ORDER BY a.updated_at DESC,a.id DESC").map_err(internal)?;
+    let mut stmt = db.prepare("SELECT a.id,a.name,COUNT(p.id),MIN(p.id),a.description FROM albums a LEFT JOIN photos p ON p.album_id=a.id GROUP BY a.id ORDER BY a.updated_at DESC,a.id DESC").map_err(internal)?;
     let rows = stmt
         .query_map([], |r| {
             Ok(Album {
@@ -99,7 +98,6 @@ pub async fn albums(State(app): State<App>) -> ApiResult<Json<Vec<Album>>> {
                 count: r.get(2)?,
                 cover_id: r.get(3)?,
                 description: r.get(4)?,
-                slideshow: r.get(5)?,
             })
         })
         .map_err(internal)?;
@@ -124,7 +122,6 @@ pub async fn create(
             name: name.into(),
             count: 0,
             cover_id: None,
-            slideshow: false,
             description: String::new(),
         }),
     ))
@@ -170,83 +167,6 @@ pub async fn list(State(app): State<App>, Path(id): Path<i64>) -> ApiResult<Json
         .map_err(internal)?;
     Ok(Json(rows.collect::<Result<Vec<_>, _>>().map_err(internal)?))
 }
-#[derive(Deserialize)]
-/// Explicit album inclusion setting; omitted or non-boolean values are rejected.
-pub struct SlideshowSetting {
-    slideshow: bool,
-}
-
-/// Saves password-free slideshow inclusion, protected by the mutation middleware.
-pub async fn set_slideshow(
-    State(app): State<App>,
-    Path(id): Path<i64>,
-    Json(input): Json<SlideshowSetting>,
-) -> ApiResult<StatusCode> {
-    let changed = app
-        .db
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE albums SET slideshow=?1 WHERE id=?2",
-            params![input.slideshow, id],
-        )
-        .map_err(internal)?;
-    if changed == 0 {
-        Err(StatusCode::NOT_FOUND)
-    } else {
-        Ok(StatusCode::NO_CONTENT)
-    }
-}
-
-#[derive(Deserialize)]
-/// Optional explicit album selection; an empty value returns no photos.
-pub struct SlideshowAlbums {
-    albums: Option<String>,
-}
-
-/// Loads either the default selection or explicitly requested album IDs.
-/// Results are ordered by album/photo ID without changing recent use; moves
-/// and deletions are reflected on the next request.
-pub async fn slideshow(
-    State(app): State<App>,
-    Query(query): Query<SlideshowAlbums>,
-) -> ApiResult<Json<Vec<Photo>>> {
-    let db = app.db.lock().unwrap();
-    let ids = query
-        .albums
-        .as_ref()
-        .map(|value| {
-            if value.is_empty() {
-                return Ok(Vec::new());
-            }
-            let ids = value
-                .split(',')
-                .map(|id| id.parse::<i64>().map_err(|_| StatusCode::BAD_REQUEST))
-                .collect::<Result<Vec<_>, _>>()?;
-            if ids.len() > 500 || ids.iter().any(|id| *id <= 0) {
-                return Err(StatusCode::BAD_REQUEST);
-            }
-            Ok(ids)
-        })
-        .transpose()?;
-    let condition = if let Some(ids) = &ids {
-        format!("a.id IN ({})", vec!["?"; ids.len()].join(","))
-    } else {
-        "a.slideshow=1".to_owned()
-    };
-    let mut stmt = db.prepare(&format!("SELECT p.id,p.name,p.description FROM photos p JOIN albums a ON a.id=p.album_id WHERE {condition} ORDER BY a.id,p.id")).map_err(internal)?;
-    let rows = stmt
-        .query_map(rusqlite::params_from_iter(ids.iter().flatten()), |r| {
-            Ok(Photo {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                description: r.get(2)?,
-            })
-        })
-        .map_err(internal)?;
-    Ok(Json(rows.collect::<Result<Vec<_>, _>>().map_err(internal)?))
-}
-
 /// Validates an uploaded image, applies orientation, and builds browsing JPEGs.
 fn prepare(bytes: &[u8]) -> anyhow::Result<(&'static str, Vec<u8>, Vec<u8>)> {
     let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
@@ -689,16 +609,6 @@ pub fn initialize(db: &rusqlite::Connection, data: &std::path::Path) -> anyhow::
             )?;
         }
     }
-    let columns = db
-        .prepare("PRAGMA table_info(albums)")?
-        .query_map([], |row| row.get::<_, String>(1))?
-        .collect::<Result<Vec<_>, _>>()?;
-    if !columns.iter().any(|name| name == "slideshow") {
-        db.execute(
-            "ALTER TABLE albums ADD COLUMN slideshow INTEGER NOT NULL DEFAULT 0",
-            [],
-        )?;
-    }
     let photos = data.join("photo-albums");
     std::fs::create_dir_all(&photos)?;
     Ok(photos)
@@ -727,20 +637,6 @@ pub fn routes() -> axum::Router<App> {
                     include_str!("../web/photos.js"),
                 )
             }),
-        )
-        .route(
-            "/slideshow.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript")],
-                    include_str!("../web/slideshow.js"),
-                )
-            }),
-        )
-        .route("/api/slideshow", get(slideshow))
-        .route(
-            "/api/albums/{id}/slideshow",
-            axum::routing::post(set_slideshow),
         )
         .route("/api/albums", get(albums).post(create))
         .route("/api/albums/{id}", axum::routing::delete(delete_album))

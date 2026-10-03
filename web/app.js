@@ -10,6 +10,23 @@
 const $ = id => document.getElementById(id);
 let parent = false;
 let collection = [];
+let selectedLetter = 'All';
+const titleOrder = new Intl.Collator('en', {sensitivity: 'base', numeric: true});
+/** Groups accented Latin initials with their base letter; other initials use #. */
+function movieLetter(title) {
+  const initial = title.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0).toUpperCase();
+  return /^[A-Z]$/.test(initial) ? initial : '#';
+}
+for (const letter of ['All', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']) {
+  const button = document.createElement('button');
+  button.textContent = letter; button.type = 'button';
+  button.setAttribute('aria-controls', 'movies');
+  button.setAttribute('aria-pressed', String(letter === selectedLetter));
+  if (letter === '#') button.setAttribute('aria-label', 'Numbers and other titles');
+  button.onclick = () => { selectedLetter = letter; render(); };
+  button.onfocus = () => button.scrollIntoView({block: 'nearest', inline: 'nearest'});
+  $('movie-alphabet').append(button);
+}
 let returnFocus;
 let currentMovie = null;
 let lastSavedAt = 0;
@@ -103,9 +120,17 @@ async function load() {
 }
 /** Rebuilds filtered movie cards and binds their profile-dependent actions. */
 function render() {
-  const movies = collection.filter(movie => movie.title.toLowerCase().includes($('search').value.toLowerCase()));
+  const query = $('search').value.trim().toLowerCase();
+  const movies = collection.filter(movie =>
+    (selectedLetter === 'All' || movieLetter(movie.title) === selectedLetter) &&
+    movie.title.toLowerCase().includes(query)
+  ).sort((a, b) => titleOrder.compare(a.title.trim(), b.title.trim()));
+  for (const button of $('movie-alphabet').children) {
+    button.setAttribute('aria-pressed', String(button.textContent === selectedLetter));
+  }
+  $('movie-count').textContent = `${movies.length} ${movies.length === 1 ? 'movie' : 'movies'} · ${selectedLetter === 'All' ? 'All titles · A–Z' : selectedLetter === '#' ? 'Numbers & other titles' : `Starting with ${selectedLetter}`}`;
   $('movies').replaceChildren(); $('empty').hidden = movies.length > 0;
-  $('empty').textContent = $('search').value ? 'No movies match your search.' : parent ? 'Add video files to your media folder, then scan the library.' : 'Your little movie shelf is waiting. Ask a parent to approve some favorites.';
+  $('empty').textContent = query || selectedLetter !== 'All' ? 'No movies match these filters. Choose All or clear your search.' : parent ? 'Add video files to your media folder, then scan the library.' : 'Your little movie shelf is waiting. Ask a parent to approve some favorites.';
   for (const movie of movies) {
     const card = document.createElement('article'); card.className = 'movie';
     const play = document.createElement('button'); play.className = 'play';
@@ -203,7 +228,7 @@ async function saveProgress(force = false) {
   catch (error) { if (force) report(error); }
 }
 /** Logs out Parents and clears profile-specific movie state from the page. */
-async function leaveParents() { await api('/api/logout', {}); parent = false; collection = []; $('movies').replaceChildren(); $('search').value = ''; }
+async function leaveParents() { await api('/api/logout', {}); parent = false; collection = []; $('movies').replaceChildren(); $('search').value = ''; selectedLetter = 'All'; $('movie-alphabet').scrollLeft = 0; }
 $('baby').onclick = async () => { try { await leaveParents(); await load(); } catch(error) { report(error); } };
 $('parents').onclick = async () => { try { const session = await api('/api/session'); if (session.parent) { parent = true; await load(); } else { show('login'); $('password').focus(); } } catch(error) { report(error); } };
 $('login-form').onsubmit = async event => { event.preventDefault(); const password = $('password').value; $('password').value = ''; try { await api('/api/login', {password}); parent = true; await load(); } catch(error) { report(error); } };

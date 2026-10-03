@@ -14,7 +14,8 @@ The application assumes a trusted home network. The running server does not prov
 | Application and movie catalog | `src/lib.rs` | Own shared state, migrate the core schema, scan media roots, authenticate Parents, serve embedded assets, list movies, and stream videos. |
 | Movie covers | `src/covers.rs` | Authorize cover access, normalize uploads, find sidecar artwork, extract FFmpeg frames, and cache JPEG results. |
 | Playback progress | `src/playback.rs` | Validate and persist shared resume positions for visible movies. |
-| Photo albums | `src/photos.rs` | Manage album/photo metadata, validate uploads, create previews, move/rename/delete items, and serve stored images. |
+| Photo albums | `src/photos.rs` | Manage album/photo metadata, validate uploads, create previews, move/rename/delete items, and serve stored images. It does not own slideshow behavior. |
+| Slideshow | `src/slideshow.rs` | Migrate selection/preset storage, select albums, build playlists, manage presets, and serve the slideshow controller. |
 | Storage reporting | `src/storage.rs` | Report filesystem capacity while counting each underlying filesystem once. |
 | Movie interface | `web/app.js` | Profiles, login, movie cards, covers, playback, progress events, storage meter, and shared dialogs. |
 | Slideshow interface | `web/slideshow.js` | Homepage dialog, fresh playlist loading, five-second looping, pause/navigation, timer cleanup, and native fullscreen. |
@@ -269,7 +270,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for verification commands and [API.md](API.
 
 ### Slideshow persistence and lifecycle
 
-Photo initialization adds `albums.slideshow INTEGER NOT NULL DEFAULT 0` if absent, preserving existing metadata and leaving albums unselected. Selection updates use the existing mutation-header middleware and remain password-free. The playlist joins selected albums to current photo membership, ordered by album ID and photo ID, without touching recent-use timestamps. It returns metadata only; the browser loads one existing preview URL at a time.
+Slideshow initialization adds `albums.slideshow INTEGER NOT NULL DEFAULT 0` if absent, preserving existing metadata and leaving albums unselected. Selection updates use the existing mutation-header middleware and remain password-free. The slideshow module exposes selected album IDs separately from ordinary album metadata. Its playlist joins selected albums to current photo membership, ordered by album ID and photo ID, without touching recent-use timestamps. It returns metadata only; the browser loads one existing preview URL at a time.
 
 The homepage controller loads a fresh playlist on each opening, discards responses after close, and keeps at most one automatic-advance timer. Pause, tab visibility, navigation, and close reset or clear it. Closing removes the image source, exits fullscreen when applicable, and restores focus. Fullscreen failures remain usable in the dialog.
 

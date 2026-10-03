@@ -56,7 +56,8 @@
   async function loadAlbums() {
     const version = ++revision;
     show('albums');
-    const albums = await api('/api/albums');
+    const [albums, selected] = await Promise.all([api('/api/albums'), api('/api/slideshow/albums')]);
+    for (const album of albums) album.slideshow = selected.includes(album.id);
     if (version !== revision || $('albums').hidden) return;
     $('album-list').replaceChildren();
     $('no-albums').hidden = albums.length > 0;

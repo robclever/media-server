@@ -51,11 +51,12 @@ Photo routes require no password. This is intentional for the trusted-home-netwo
 
 | Method | Path | Request or response |
 | --- | --- | --- |
-| `GET` | `/api/albums` | Albums ordered by recent use: `id`, `name`, `description`, `count`, `cover_id`, and boolean `slideshow`. |
+| `GET` | `/api/albums` | Albums ordered by recent use: `id`, `name`, `description`, `count`, and `cover_id`. |
 | `POST` | `/api/albums` | `{"name":"Album"}`; returns the created album with `201 Created`. |
 | `DELETE` | `/api/albums/{id}` | Permanently deletes the album and every stored photo variant. |
 | `POST` | `/api/albums/{id}/name` | `{"name":"New name"}`. |
 | `GET` | `/api/slideshow` | Selected albums’ photos as `id`, `name`, `description`, ordered by album ID then photo ID. Empty selections return `[]`; does not update recent use. |
+| `GET` | `/api/slideshow/albums` | IDs of albums included in the default slideshow, ordered by ID. |
 | `POST` | `/api/albums/{id}/slideshow` | `{"slideshow":true}` or `false`; returns `204`, `404` for a missing album, or `422` for missing/non-boolean fields. Requires the mutation header; no Parents session. |
 | `POST` | `/api/albums/{id}/description` | `{"description":"..."}`; up to 2,000 characters. Empty clears it. |
 | `GET` | `/api/albums/{id}/photos` | Photo records with `id`, `name`, and `description`. Opening the list marks the album recently used. |
