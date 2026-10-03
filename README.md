@@ -146,6 +146,25 @@ This prepares a playable file ahead of time; the server does not transcode durin
 
 The scanner ignores symlinks, preserves approvals by location name and relative file path, and hides removed files after a scan. New paths are unapproved by default. Replacing content at an already approved path retains its approval, so review that approval when replacing files. Only trusted household administrators should have write access to the media directory.
 
+### Rip a DVD or Blu-ray on this Mac
+
+With MakeMKV and FFmpeg installed, run this from the repository root to rip a
+Blu-ray and create an MP4:
+
+```sh
+python3 scripts/rip_scripts/rip_bluray.py --drive 1
+```
+
+Drive `1` is the BU40N Blu-ray drive on the current two-drive setup. The script
+selects the largest title and saves the original MKV, a native-resolution MP4,
+and a log in a new folder under `scripts/rip_scripts/output/`. Add `--scan` to
+list titles without ripping, `--title NUMBER` to select a title, or `--mkv-only`
+to skip conversion and preserve original HDR for UHD discs.
+
+See the [one-command Blu-ray guide](scripts/rip_scripts/README.md) for more
+options and the [DVD and Blu-ray ripping guide](scripts/ripping/README.md) for
+the existing DVD workflow and publishing instructions.
+
 ## Add movies step by step
 
 There is **no web upload button**. Copy files into the host media folder, then ask the server to scan it. You do not copy movies into the Docker image, and adding a movie does not require rebuilding or restarting the container.
@@ -812,6 +831,8 @@ To restore the default data path, stop the service, move the current `data` dire
 | `.local` address fails | Use the Pi IP address. |
 
 ## Validation status
+
+Slideshow architecture refactor (September 27, 2026): `src/photos.rs` now contains only album/photo behavior. `src/slideshow.rs` owns slideshow migrations, default selections, playlist queries, presets, routes, and its browser asset. The photo API returns ordinary album metadata; `/api/slideshow/albums` returns selected IDs separately. All 20 Rust integration tests, six Playwright tests, formatting, Clippy, rustdoc, and diff checks pass. The Pi is deployed and healthy, and a live read-only browser check confirmed the separated APIs and unchanged UI. Deployment backup: `/home/rob/custom-plex-backups/20260927T200407Z`; rollback image: `custom-plex:before-20260927t200407z`.
 
 Small-screen slideshow update (September 27, 2026): all 20 Rust integration tests and six Playwright browser tests pass. The added 960 × 480 test verifies that the slideshow dialog scrolls internally, the page behind it remains fixed, and the sticky playback/fullscreen controls stay inside the visible viewport. The same read-only check passed against the deployed Pi. Deployment backup: `/home/rob/custom-plex-backups/20260927T192802Z`; rollback image: `custom-plex:before-20260927t192802z`.
 
