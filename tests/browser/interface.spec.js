@@ -105,3 +105,277 @@ test('compact controls, descriptions, and movie resume work in a browser', async
     }
   }
 });
+
+test('homepage slideshow selects albums, plays, pauses, wraps, and enters native fullscreen', async ({ page, request }) => {
+  const ids = [];
+  try {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+    await expect(page.locator('#slide-status')).toContainText('No photos selected');
+    await expect(page.locator('#slide-pause')).toBeDisabled();
+    await page.getByRole('button', { name: 'Close slideshow' }).click();
+    for (const name of ['Slideshow memories', 'Excluded memories']) {
+      const response = await request.post('/api/albums', { headers: requestHeaders, data: { name } });
+      const album = await response.json(); ids.push(album.id);
+      // Real image bytes, served by the application's preview endpoint.
+      await page.evaluate(async id => {
+        const canvas = document.createElement('canvas'); canvas.width = 20; canvas.height = 10;
+        for (const name of ['first.png', 'second.png']) {
+          const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+          const response = await fetch(`/api/albums/${id}/photos?name=${name}`, {
+            method: 'POST', headers: { 'X-Requested-With': 'custom-plex' }, body: blob,
+          });
+          if (!response.ok) throw new Error('Fixture upload failed');
+        }
+      }, album.id);
+    }
+    await page.getByRole('button', { name: /Photo Album/ }).click();
+    const choice = page.getByRole('checkbox', { name: 'Use Slideshow memories in slideshow', exact: true });
+    await choice.check();
+    await expect(choice).toBeEnabled();
+    await page.reload();
+    await page.getByRole('button', { name: /Photo Album/ }).click();
+    await expect(choice).toBeChecked();
+    await expect(page.getByRole('checkbox', { name: 'Use Excluded memories in slideshow' })).not.toBeChecked();
+    await page.getByRole('button', { name: 'Switch profile' }).click();
+    await page.clock.install();
+    await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+    await expect(page.locator('#slide-status')).toHaveText('1 of 2');
+    await expect.poll(() => page.locator('#slide-image').evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
+    await page.clock.fastForward(5000);
+    await expect(page.locator('#slide-status')).toHaveText('2 of 2');
+    await page.getByRole('button', { name: 'Pause slideshow', exact: true }).click();
+    await page.clock.fastForward(15000);
+    await expect(page.locator('#slide-status')).toHaveText('2 of 2');
+    await page.getByRole('button', { name: 'Next slide', exact: true }).click();
+    await expect(page.locator('#slide-status')).toHaveText('1 of 2');
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.locator('#slide-status')).toHaveText('2 of 2');
+    await page.getByRole('button', { name: 'Resume slideshow', exact: true }).click();
+    await page.clock.fastForward(5000);
+    await expect(page.locator('#slide-status')).toHaveText('1 of 2');
+    await page.getByRole('button', { name: 'Enter fullscreen', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('slideshow-screen');
+    await expect(page.locator('#slide-image')).toHaveJSProperty('naturalWidth', 20);
+    await expect(page.locator('#slide-caption')).not.toBeVisible();
+    await expect(page.locator('.slideshow-controls')).not.toBeVisible();
+    await expect(page.getByRole('button', { name: 'Close slideshow' })).not.toBeVisible();
+    const bounds = await page.locator('#slide-image').boundingBox();
+    const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+    expect(bounds).toEqual({ x: 0, y: 0, ...viewport });
+    await expect(page.getByRole('button', { name: 'Exit fullscreen', exact: true })).toHaveText('×');
+    await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
+    await expect(page.locator('#slideshow-player')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Enter fullscreen', exact: true })).toBeFocused();
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#slideshow-player')).not.toBeVisible();
+    await expect(page.getByRole('button', { name: 'Play slideshow', exact: true })).toBeFocused();
+    await page.clock.fastForward(15000);
+    await expect(page.locator('#slide-image')).not.toHaveAttribute('src');
+    await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+    await expect(page.locator('#slide-status')).toHaveText('1 of 2');
+    await page.getByRole('button', { name: 'Enter fullscreen', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('slideshow-screen');
+    await page.keyboard.press('Space');
+    await expect(page.locator('#slide-pause')).toHaveText('Resume slideshow');
+    await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
+    await page.getByRole('button', { name: 'Close slideshow' }).click();
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+    await expect(page.getByRole('button', { name: 'Play slideshow', exact: true })).toBeFocused();
+    await page.getByRole('button', { name: /Photo Album/ }).click();
+    await choice.uncheck();
+    await expect(choice).toBeEnabled();
+    await page.getByRole('button', { name: 'Switch profile' }).click();
+    await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+    await expect(page.locator('#slide-status')).toContainText('No photos selected');
+  } finally {
+    for (const id of ids) await request.delete(`/api/albums/${id}`, { headers: requestHeaders });
+  }
+});
+
+test('slideshow handles load failures, close during loading, and unavailable photos', async ({ page }) => {
+  await page.goto('/');
+  await page.route('**/api/slideshow', route => route.fulfill({ status: 500, body: '' }));
+  await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+  await expect(page.locator('#slide-status')).toContainText('Unable to load slideshow');
+  await page.getByRole('button', { name: 'Close slideshow' }).click();
+  let release;
+  const blocked = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/slideshow', async route => {
+    await blocked;
+    await route.fulfill({ json: [{ id: 999999, name: 'Missing photo', description: '' }] });
+  });
+  await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+  await expect(page.locator('#slide-status')).toHaveText('Loading slideshow…');
+  await page.getByRole('button', { name: 'Close slideshow' }).click();
+  release();
+  await expect(page.locator('#slideshow-player')).not.toBeVisible();
+  await expect(page.locator('#slide-image')).not.toHaveAttribute('src');
+  await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+  await expect(page.locator('#slide-status')).toContainText('This photo is unavailable');
+  await page.getByRole('button', { name: 'Next slide', exact: true }).click();
+  await expect(page.locator('#slide-caption')).toHaveText('Missing photo');
+});
+
+test('slideshow timing and effects persist and respect reduced motion', async ({ page }) => {
+  await page.route('**/api/slideshow', route => route.fulfill({ json: [
+    { id: 900001, name: 'First', description: '' }, { id: 900002, name: 'Second', description: '' },
+  ] }));
+  await page.route('**/api/photos/90000*/preview', route => route.fulfill({
+    contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="blue"/></svg>',
+  }));
+  await page.goto('/');
+  await page.clock.install();
+  await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+  await expect(page.locator('#slide-status')).toHaveText('1 of 2');
+  await expect(page.getByLabel('Transition duration')).toBeDisabled();
+  await page.getByLabel('Time per photo').selectOption('10');
+  await page.clock.fastForward(5000);
+  await expect(page.locator('#slide-status')).toHaveText('1 of 2');
+  await page.clock.fastForward(5000);
+  await expect(page.locator('#slide-status')).toHaveText('2 of 2');
+  await page.getByRole('button', { name: 'Pause slideshow', exact: true }).click();
+  for (const effect of ['fade', 'slide', 'zoom']) {
+    await page.getByLabel('Transition effect').selectOption(effect);
+    await page.getByLabel('Transition duration').selectOption('2000');
+    await page.getByRole('button', { name: 'Next slide', exact: true }).click();
+    await expect.poll(() => page.locator('#slide-image').evaluate(img => img.getAnimations().length)).toBe(1);
+    const animation = await page.locator('#slide-image').evaluate(img => {
+      const animation = img.getAnimations()[0]; animation.pause(); animation.currentTime = 1000;
+      return { duration: animation.effect.getTiming().duration, frames: animation.effect.getKeyframes(), opacity: getComputedStyle(img).opacity };
+    });
+    expect(animation.duration).toBe(2000);
+    expect(Number(animation.opacity)).toBeGreaterThan(0);
+    expect(Number(animation.opacity)).toBeLessThan(1);
+    if (effect === 'slide') expect(animation.frames[0].transform).toContain('translateX');
+    if (effect === 'zoom') expect(animation.frames[0].transform).toContain('scale');
+  }
+  await page.reload();
+  await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+  await expect(page.getByLabel('Time per photo')).toHaveValue('10');
+  await expect(page.getByLabel('Transition effect')).toHaveValue('zoom');
+  await expect(page.getByLabel('Transition duration')).toHaveValue('2000');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(page.locator('#slide-status')).toHaveText('1 of 2');
+  await page.getByRole('button', { name: 'Next slide', exact: true }).click();
+  await expect(page.locator('#slide-status')).toHaveText('2 of 2');
+  await expect.poll(() => page.locator('#slide-image').evaluate(img => img.complete)).toBe(true);
+  expect(await page.locator('#slide-image').evaluate(img => img.getAnimations().length)).toBe(0);
+  await page.getByRole('button', { name: 'Enter fullscreen', exact: true }).click();
+  await expect(page.locator('.slideshow-settings')).not.toBeVisible();
+  await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
+  await expect(page.getByLabel('Transition effect')).toBeVisible();
+  await page.getByLabel('Transition effect').selectOption('none');
+  await expect(page.getByLabel('Transition duration')).toBeDisabled();
+});
+
+test('slideshow scroll stays inside the dialog on a short TV viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 480 });
+  await page.route('**/api/slideshow', route => route.fulfill({ json: [
+    { id: 900010, name: 'TV photo', description: 'A caption for the short viewport.' },
+  ] }));
+  await page.route('**/api/photos/900010/preview', route => route.fulfill({
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="blue"/></svg>',
+  }));
+  await page.goto('/');
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const pageScrollBefore = await page.evaluate(() => scrollY);
+  await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+
+  const dialog = page.locator('#slideshow-player');
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('body')).toHaveClass(/slideshow-open/);
+  await expect(page.getByRole('button', { name: 'Enter fullscreen', exact: true })).toBeVisible();
+  await expect.poll(() => dialog.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+
+  await dialog.hover();
+  await page.mouse.wheel(0, 1200);
+  await expect.poll(() => dialog.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => scrollY)).toBe(pageScrollBefore);
+  await expect(page.getByRole('button', { name: 'Enter fullscreen', exact: true })).toBeVisible();
+  const controls = await page.locator('.slideshow-controls').boundingBox();
+  expect(controls).not.toBeNull();
+  expect(controls.y + controls.height).toBeLessThanOrEqual(480);
+
+  await page.getByRole('button', { name: 'Close slideshow' }).click();
+  await expect(page.locator('body')).not.toHaveClass(/slideshow-open/);
+});
+
+test('shuffle, fullscreen captions, and shared presets work through browser controls', async ({ page, request, browser }) => {
+  let albumId, presetId;
+  const spotify = 'https://open.spotify.com/playlist/0123456789012345678901';
+  try {
+    albumId = (await (await request.post('/api/albums', { headers: requestHeaders, data: { name: 'Preset album' } })).json()).id;
+    await page.goto('/');
+    await page.evaluate(async id => {
+      const canvas = document.createElement('canvas'); canvas.width = 20; canvas.height = 10;
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      for (let n = 1; n <= 4; n++) {
+        const response = await fetch(`/api/albums/${id}/photos?name=Memory-${n}`, { method: 'POST', headers: { 'X-Requested-With': 'custom-plex' }, body: blob });
+        if (!response.ok) throw new Error('Upload failed');
+      }
+    }, albumId);
+    await page.clock.install();
+    await page.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+    await page.getByText('Albums, presets & music', { exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Preset album', exact: true }).check();
+    await expect(page.locator('#slide-status')).toHaveText('1 of 4');
+    await page.getByRole('button', { name: 'Pause slideshow', exact: true }).click();
+    await page.getByLabel('Photo order').selectOption('on');
+    const seen = [];
+    for (let n = 0; n < 4; n++) {
+      seen.push(await page.locator('#slide-image').getAttribute('src'));
+      await page.getByRole('button', { name: 'Next slide', exact: true }).click();
+    }
+    expect(new Set(seen).size).toBe(4);
+    expect(await page.locator('#slide-image').getAttribute('src')).not.toBe(seen[3]);
+    await page.getByRole('combobox', { name: 'Captions', exact: true }).selectOption('brief');
+    await page.getByRole('button', { name: 'Enter fullscreen', exact: true }).click();
+    await expect(page.locator('#slide-caption')).toBeVisible();
+    await page.clock.fastForward(3000);
+    await expect(page.locator('#slide-caption')).not.toBeVisible();
+    await expect(page.locator('#slide-exit-fullscreen')).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('#slide-status')).toHaveText('2 of 4');
+    await expect(page.locator('#slide-caption')).toBeVisible();
+    await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Captions', exact: true }).selectOption('always');
+    await page.getByLabel('Time per photo').selectOption('15');
+    await page.getByLabel('Spotify playlist, album, or track link').fill(spotify + '?si=tracking');
+    await expect(page.getByRole('link', { name: 'Open in Spotify' })).toHaveAttribute('href', spotify);
+    await page.getByLabel('Preset name', { exact: true }).fill('Evening preset');
+    await page.getByRole('button', { name: 'Save new preset', exact: true }).click();
+    await expect(page.locator('#slide-setup-status')).toHaveText('Saved Evening preset.');
+    presetId = Number(await page.locator('#slide-preset').inputValue());
+    const second = await browser.newContext();
+    try {
+      const other = await second.newPage();
+      await other.goto('http://127.0.0.1:18084/');
+      await other.getByRole('button', { name: 'Play slideshow', exact: true }).click();
+      await other.getByText('Albums, presets & music', { exact: true }).click();
+      await other.getByLabel('Saved presets').selectOption(String(presetId));
+      await other.getByRole('button', { name: 'Load preset', exact: true }).click();
+      await expect(other.locator('#slide-status')).toHaveText('1 of 4');
+      await expect(other.getByLabel('Time per photo')).toHaveValue('15');
+      await expect(other.getByLabel('Photo order')).toHaveValue('on');
+      await expect(other.getByRole('combobox', { name: 'Captions', exact: true })).toHaveValue('always');
+      await expect(other.getByRole('link', { name: 'Open in Spotify' })).toHaveAttribute('href', spotify);
+      await other.getByLabel('Preset name', { exact: true }).fill('Updated preset');
+      await other.getByRole('button', { name: 'Update preset', exact: true }).click();
+      await expect(other.locator('#slide-setup-status')).toHaveText('Saved Updated preset.');
+      await other.getByLabel('Spotify playlist, album, or track link').fill('javascript:alert(1)');
+      await expect(other.getByRole('link', { name: 'Open in Spotify' })).not.toBeVisible();
+      await other.getByRole('button', { name: 'Update preset', exact: true }).click();
+      await expect(other.locator('#slide-setup-status')).toContainText('Use a Spotify');
+      await other.getByRole('button', { name: 'Delete preset', exact: true }).click();
+      await expect(other.locator('#slide-setup-status')).toContainText('Preset deleted');
+    } finally { await second.close(); }
+    const selected = await (await request.get('/api/slideshow/albums')).json();
+    expect(selected).not.toContain(albumId);
+  } finally {
+    if (presetId) await request.delete(`/api/slideshow/presets/${presetId}`, { headers: requestHeaders });
+    if (albumId) await request.delete(`/api/albums/${albumId}`, { headers: requestHeaders });
+  }
+});

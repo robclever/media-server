@@ -67,3 +67,15 @@ The Pi deployer assumes an existing configured installation. It must preserve `.
 - retain a previous image and print its rollback tag;
 - wait for health and attempt recovery after startup failure;
 - never silently fall back from external photo storage to the SD card.
+
+## Slideshow verification
+
+`tests/photos.rs` checks defaults, selection validation and mutation-header enforcement, persisted inclusion after restart, exclusion of unselected/empty albums, and playlist changes after moves and deletions. `tests/browser/interface.spec.js` exercises actual album checkboxes and page reloads, preview decoding, timed advancement, pause/resume, wraparound, keyboard navigation, native Chromium fullscreen entry/exit, Escape, focus restoration, and empty-selection guidance against the disposable server. Browser time is controlled by Playwright; fullscreen uses the real browser API.
+
+Fullscreen browser assertions verify that the image occupies the entire viewport, captions and toolbar are hidden, and the × button exits fullscreen while keeping the slideshow open and restoring focus. Space toggles playback in fullscreen.
+
+The slideshow options browser test checks the selected advance interval, rendered animation opacity and keyframes for all effects, duration, settings after reload, reduced-motion behavior, and hidden options in fullscreen.
+
+The short TV viewport test uses a 960 × 480 browser window. It verifies that scrolling changes the slideshow dialog's scroll position, leaves the document behind it fixed, and keeps the sticky fullscreen controls inside the viewport.
+
+Preset server tests cover validation, mutation protection, explicit album filtering, restart persistence, update/delete semantics, and independence from default album flags. The browser test creates real photos, checks shuffle uniqueness and pass boundaries, verifies caption expiry and fullscreen overlays, and saves/loads/updates/deletes a preset across independent browser contexts. Spotify links are checked for canonical destinations and unsafe URL rejection; tests do not require or claim Spotify playback.

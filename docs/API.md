@@ -55,6 +55,9 @@ Photo routes require no password. This is intentional for the trusted-home-netwo
 | `POST` | `/api/albums` | `{"name":"Album"}`; returns the created album with `201 Created`. |
 | `DELETE` | `/api/albums/{id}` | Permanently deletes the album and every stored photo variant. |
 | `POST` | `/api/albums/{id}/name` | `{"name":"New name"}`. |
+| `GET` | `/api/slideshow` | Selected albums’ photos as `id`, `name`, `description`, ordered by album ID then photo ID. Empty selections return `[]`; does not update recent use. |
+| `GET` | `/api/slideshow/albums` | IDs of albums included in the default slideshow, ordered by ID. |
+| `POST` | `/api/albums/{id}/slideshow` | `{"slideshow":true}` or `false`; returns `204`, `404` for a missing album, or `422` for missing/non-boolean fields. Requires the mutation header; no Parents session. |
 | `POST` | `/api/albums/{id}/description` | `{"description":"..."}`; up to 2,000 characters. Empty clears it. |
 | `GET` | `/api/albums/{id}/photos` | Photo records with `id`, `name`, and `description`. Opening the list marks the album recently used. |
 | `POST` | `/api/albums/{id}/photos?name=...` | Raw JPEG, PNG, or WebP body. Maximum 24 MiB and 8192 pixels per side. Returns `201 Created`. |
@@ -99,3 +102,15 @@ Photo routes require no password. This is intentional for the trusted-home-netwo
 | `429` | Login-attempt limit reached. |
 | `500` | Database, filesystem, or processing failure. |
 | `503` | Parents password has not been configured. |
+
+## Slideshow presets
+
+All routes are password-free. Mutations require `X-Requested-With: custom-plex`.
+
+- `GET /api/slideshow?albums=1,2`: playlist for explicit album IDs, without changing default selections or recent-use ordering. `albums=` returns an empty list; omitted uses the default flags. Deleted IDs contribute no photos. Invalid/nonpositive IDs or more than 500 IDs return `400`.
+- `GET /api/slideshow/presets`: array of `{id,name,album_ids,options}`.
+- `POST /api/slideshow/presets`: create, returning the record with `201`.
+- `POST /api/slideshow/presets/{id}`: replace an existing preset, returning `204` or `404`.
+- `DELETE /api/slideshow/presets/{id}`: delete preset metadata only, returning `204` or `404`.
+
+Create/update bodies contain `name` (1–80 characters, trimmed, no control characters), `album_ids` (up to 500 unique positive integers), and `options`. Album IDs may refer to deleted albums; loading skips them. Options are strings: `interval` (3/5/10/15/30), `effect` (none/fade/slide/zoom), `duration` (300/600/1000/2000), `shuffle` (off/on), `captions` (off/brief/always), and optional `spotify` (empty or canonical `https://open.spotify.com/{playlist|album|track}/{22-character alphanumeric ID}`). Unsupported values return `400`; missing/mistyped fields return `422`. Names need not be unique. Settings do not alter album inclusion flags or store Spotify credentials.

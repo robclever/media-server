@@ -5,3 +5,64 @@
 .cover img{display:block;width:100%;height:190px;object-fit:contain;background:#101919}.image-actions{display:flex;flex-direction:column;gap:.5rem;margin:0 1rem 1rem}.image-actions button{font-size:.8rem;padding:.6rem}button:disabled{opacity:.55;cursor:wait}
 
 .profiles{flex-wrap:wrap}.photo-avatar{background:#cfb99d;color:#493f32}.album-card{width:100%;padding:0;overflow:hidden;text-align:left}.album-open{display:block;width:100%;padding:0;border:0;border-radius:0;text-align:left;background:transparent}.album-card h2,.album-card p{margin:1rem}.album-card img{width:100%;height:190px;object-fit:cover;display:block}.album-placeholder{height:190px;display:grid;place-items:center;font-size:3rem;color:#e8d7a1;background:#34483b}.photo-tile{padding:0;overflow:hidden;background:#192c25}.photo-tile img{display:block;width:100%;height:200px;object-fit:contain}.photo-tile span{display:block;padding:.75rem;overflow-wrap:anywhere}#full-photo{display:block;max-width:100%;height:65vh;object-fit:contain;margin:auto}.photo-navigation{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:1rem 0}.photo-navigation a{color:#eac77c}#upload-progress{white-space:pre-line}.icon-actions{display:flex;justify-content:center;gap:.75rem;padding:1rem;border-top:1px solid #ffffff18}.icon-actions button{display:flex;align-items:center;gap:.45rem;font-size:1.1rem}.icon-actions button span{font-size:.8rem}.icon-actions.compact{justify-content:flex-end;padding:.65rem}.icon-actions.compact button{min-height:40px;padding:.5rem .7rem}.danger{color:#ffd2cb;border-color:#9e5c54}.menu-list{display:grid;gap:.7rem}.menu-list button{text-align:left}.dialog-actions{display:flex;justify-content:flex-end;gap:.75rem}.storage{max-width:880px;margin:3rem auto 0;padding:1.25rem;text-align:left;background:#182823;border:1px solid #ffffff1a;border-radius:15px}.storage progress{width:100%;height:1rem;margin:.75rem 0;accent-color:#d7be83}.storage p{margin:.25rem 0}.storage small{display:block;color:#91a69a;overflow-wrap:anywhere}
+
+.home-slideshow { margin-top: 2rem; }
+.slideshow-selection { display: flex; align-items: center; gap: .6rem; padding: .75rem; }
+.slideshow-selection input { width: auto; margin: 0; }
+#slideshow-player { width: min(1100px, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); padding: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+#slideshow-screen { display: flex; flex-direction: column; min-height: 100%; padding: 1rem; }
+body.slideshow-open { overflow: hidden; }
+#slide-image { width: 100%; min-height: 0; height: 55dvh; object-fit: contain; background: #000; }
+#slide-image[hidden] { display: none; }
+#slide-caption { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12dvh; overflow: auto; }
+.slideshow-controls { position: sticky; bottom: -1rem; z-index: 2; display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 -1rem -1rem; padding: .75rem 1rem 1rem; background: linear-gradient(transparent 0, #12231c 24%); }
+#slide-exit-fullscreen { display: none; }
+#slideshow-screen:fullscreen { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; padding: 0; margin: 0; background: #000; border: 0; border-radius: 0; overflow: hidden; }
+#slideshow-screen:fullscreen #slide-image { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; object-fit: contain; }
+#slideshow-screen:fullscreen .player-heading,
+#slideshow-screen:fullscreen .slideshow-controls,
+#slideshow-screen:fullscreen .slideshow-settings,
+#slideshow-screen:fullscreen #slide-caption,
+#slideshow-screen:fullscreen #slide-status { display: none; }
+#slideshow-screen:fullscreen #slide-exit-fullscreen { display: grid; place-items: center; position: absolute; top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); z-index: 1; width: 44px; height: 44px; min-height: 0; padding: 0; border: 1px solid #ffffff80; border-radius: 50%; background: #0008; color: #fff; font-size: 30px; line-height: 1; }
+#slideshow-screen:fullscreen #slide-image[hidden] ~ #slide-status { display: block; margin: auto; max-width: 65ch; padding: 3rem; color: #fff; }
+
+.slideshow-settings { display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; margin: 0 0 1rem; padding: .75rem; border: 1px solid #607165; border-radius: 10px; }
+.slideshow-settings label { display: flex; flex-direction: column; gap: .4rem; }
+.slideshow-settings select { font: inherit; color: #fff; background: #172621; border: 1px solid #607165; border-radius: 6px; padding: .5rem; }
+.slideshow-settings small { flex-basis: 100%; }
+.slideshow-settings select:focus-visible { outline: 3px solid #f5ce79; }
+
+.slideshow-setup { margin-bottom: 1rem; }
+.slideshow-setup summary { cursor: pointer; padding: .5rem 0; }
+#slide-albums { display: flex; flex-wrap: wrap; gap: .75rem; }
+#slide-albums label { display: flex; gap: .5rem; align-items: center; }
+#slide-albums input { width: auto; margin: 0; }
+#slide-caption { display: none; }
+#slideshow-screen.show-captions #slide-caption { display: block; }
+#slideshow-screen:fullscreen .slideshow-setup { display: none; }
+#slideshow-screen:fullscreen.show-captions #slide-caption { display: block; position: absolute; bottom: 1.5rem; left: 10%; width: 80%; box-sizing: border-box; margin: 0; padding: .75rem; background: #000b; color: white; text-align: center; pointer-events: none; }
+#slide-open-spotify { display: inline-block; color: #f5ce79; padding: .75rem; }
+#slide-open-spotify[hidden] { display: none; }
+
+@media (max-height: 700px) {
+  #slideshow-player { max-height: calc(100dvh - 1rem); }
+  #slideshow-screen { padding: .75rem; }
+  #slide-image { height: min(42dvh, 280px); }
+  .player-heading h2 { margin: .25rem 0; font-size: 1.2rem; }
+  .slideshow-settings { gap: .5rem 1rem; padding: .6rem; }
+  .slideshow-settings label { flex: 1 1 150px; }
+  .slideshow-controls { bottom: -.75rem; margin: 0 -.75rem -.75rem; padding: .65rem .75rem .75rem; }
+  .slideshow-controls button { flex: 1 1 145px; padding: .65rem .8rem; }
+}
+
+/* One scrollable row keeps the alphabet compact on phones and TV screens. */
+.alphabet-heading{display:flex;justify-content:space-between;gap:1rem;color:#b0c1b6;font-size:.85rem;margin-top:.5rem}
+.alphabet-heading small{color:#91a69a}
+.movie-alphabet{display:flex;gap:.35rem;overflow-x:auto;padding:.65rem .5rem .85rem;scroll-padding-inline:.5rem;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:#607165 #172621;border-bottom:1px solid #ffffff18}
+.movie-alphabet button{flex:0 0 auto;min-width:44px;min-height:44px;padding:.5rem .65rem;border-color:transparent;background:transparent;color:#b0c1b6;font-weight:600}
+.movie-alphabet button:hover{background:#2b4337;color:#fff}
+.movie-alphabet button[aria-pressed="true"]{background:#eac77c;color:#233d33;border-color:#eac77c}
+.movie-alphabet button:focus-visible{outline-offset:1px;outline-width:3px}
+.movie-count{font-size:.85rem;margin:.8rem 0 0}
+#movies{margin-top:1rem}

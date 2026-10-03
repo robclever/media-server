@@ -56,7 +56,8 @@
   async function loadAlbums() {
     const version = ++revision;
     show('albums');
-    const albums = await api('/api/albums');
+    const [albums, selected] = await Promise.all([api('/api/albums'), api('/api/slideshow/albums')]);
+    for (const album of albums) album.slideshow = selected.includes(album.id);
     if (version !== revision || $('albums').hidden) return;
     $('album-list').replaceChildren();
     $('no-albums').hidden = albums.length > 0;
@@ -80,6 +81,16 @@
       describe.onclick = () => describeAlbum(album).catch(report);
       const remove = document.createElement('button'); remove.className = 'icon-button danger'; remove.dataset.tooltip = 'Delete album'; remove.setAttribute('aria-label', `Delete ${album.name}`); remove.textContent = '🗑';
       remove.onclick = () => deleteAlbum(album).catch(report);
+      const selection = document.createElement('label'); selection.className = 'slideshow-selection';
+      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = album.slideshow;
+      checkbox.setAttribute('aria-label', `Use ${album.name} in slideshow`);
+      checkbox.onchange = async () => {
+        checkbox.disabled = true;
+        try { await api(`/api/albums/${album.id}/slideshow`, {slideshow: checkbox.checked}); album.slideshow = checkbox.checked; }
+        catch (error) { checkbox.checked = album.slideshow; report(error); }
+        finally { checkbox.disabled = false; }
+      };
+      selection.append(checkbox, document.createTextNode('Use in slideshow')); card.append(selection);
       actions.append(rename, describe, remove); card.append(open, actions); $('album-list').append(card);
     }
   }

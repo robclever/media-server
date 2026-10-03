@@ -56,6 +56,7 @@ For a TV on the same home network, use `http://<this-macs-lan-ip>:8080`, not `lo
 - Rename movie titles, albums, and photos; move photos between albums; and delete photos or albums with confirmation.
 - Compact icon controls with hover and keyboard-focus tooltips on movie and photo-album cards.
 - Persistent descriptions for photo albums and individual photos.
+- Homepage slideshow from selected albums, with automatic playback, pause, navigation, and fullscreen.
 - Shared movie resume positions that survive restarts and deployments.
 - Home-profile storage reporting that separates actual Custom Plex file sizes from whole-device capacity, with shared filesystems counted once.
 - Baby sees and streams only titles explicitly approved by a parent.
@@ -145,6 +146,25 @@ This prepares a playable file ahead of time; the server does not transcode durin
 
 The scanner ignores symlinks, preserves approvals by location name and relative file path, and hides removed files after a scan. New paths are unapproved by default. Replacing content at an already approved path retains its approval, so review that approval when replacing files. Only trusted household administrators should have write access to the media directory.
 
+### Rip a DVD or Blu-ray on this Mac
+
+With MakeMKV and FFmpeg installed, run this from the repository root to rip a
+Blu-ray and create an MP4:
+
+```sh
+python3 scripts/rip_scripts/rip_bluray.py --drive 1
+```
+
+Drive `1` is the BU40N Blu-ray drive on the current two-drive setup. The script
+selects the largest title and saves the original MKV, a native-resolution MP4,
+and a log in a new folder under `scripts/rip_scripts/output/`. Add `--scan` to
+list titles without ripping, `--title NUMBER` to select a title, or `--mkv-only`
+to skip conversion and preserve original HDR for UHD discs.
+
+See the [one-command Blu-ray guide](scripts/rip_scripts/README.md) for more
+options and the [DVD and Blu-ray ripping guide](scripts/ripping/README.md) for
+the existing DVD workflow and publishing instructions.
+
 ## Add movies step by step
 
 There is **no web upload button**. Copy files into the host media folder, then ask the server to scan it. You do not copy movies into the Docker image, and adding a movie does not require rebuilding or restarting the container.
@@ -223,6 +243,27 @@ Use the star icon on a movie card to add it to Baby, then switch to Baby to chec
 - **Replace at the same path:** the existing approval remains. Revoke Baby approval before replacing content if it should be reviewed again.
 - **Remove:** move the file outside the media folder or delete it, then scan. Its card disappears. Stored database entries are retained, so reintroducing the exact same path restores its previous approval.
 - **Missing after a scan:** check that the copy completed, its final extension is supported, it is inside the configured folder, it is not a symlink, and the container can read it. Then check whether you are viewing Baby or Parents.
+
+## Homepage slideshow
+
+1. Open **Photo Album** and check **Use in slideshow** on each album you want to include. Choices are shared across devices and survive restarts and deployments. New and existing albums start unselected.
+2. Return with **Switch profile**, then choose **Play slideshow** on the homepage.
+3. Photos advance every five seconds by default and loop in album creation order, then photo upload order. Use **Pause slideshow** / **Resume slideshow**, **Previous slide**, **Next slide**, or the left/right arrow keys.
+4. Select **Enter fullscreen** for a screen-filling player. Fullscreen uses the entire screen for the photo, hides headings, captions, and playback buttons, and keeps a small **×** in the upper-right corner to return to the window. Photos retain their proportions, with black space where necessary. Arrow keys still navigate and Space pauses/resumes. **Close slideshow** stops playback and returns focus to the homepage. Escape uses the browser's normal fullscreen/dialog exit behavior.
+
+The player uses browsing previews (up to 1600 pixels) and can display photo names and descriptions as optional captions. If fullscreen is unsupported or denied, playback remains available in the dialog. Empty selections show instructions; empty albums add no slides. A missing photo shows an error and the player can continue to the next slide. Automatic advances pause while the browser tab is hidden.
+
+On TVs and other short screens, the slideshow window scrolls independently of the page behind it. The playback and fullscreen controls remain pinned to the bottom of the visible window while you browse the options.
+
+**Slideshow options** in the windowed player let you choose 3, 5, 10, 15, or 30 seconds per photo; None, Fade, Slide, or Zoom transitions; and a transition duration of 0.3, 0.6, 1, or 2 seconds. Time per photo sets the interval between advances; transition duration controls the incoming photo animation within that interval. Choices are saved in the current browser, independently of other devices. Exit fullscreen with × to adjust them. Reduced-motion browser preferences disable animation while keeping automatic playback.
+
+**Shuffle and captions:** Choose **Photo order → Shuffle** for randomized passes through the selected photos, without repeats inside a pass or an immediate repeat between passes. Previous moves backward within the current pass. Choose **Captions → Off**, **Brief (3 seconds)**, or **Always**. Captions use the photo name and description, and appear as an overlay in fullscreen when enabled.
+
+**Presets:** Expand **Albums, presets & music** in the windowed player. Choose albums for this playback, enter a preset name, and select **Save new preset**. A preset stores the album combination, timing, effect, transition duration, shuffle, captions, and optional Spotify link. Presets are shared across devices and survive restarts/deployments. Select a saved preset and choose **Load preset** to apply it, **Update preset** to replace it with your current choices, or **Delete preset** to remove only the preset. These album choices do not change the homepage’s default **Use in slideshow** selections. Albums deleted since saving are skipped with a notice. Loading starts a fresh photo pass and preserves the current pause state.
+
+**Spotify music:** Paste a Spotify playlist, album, or track share link in the music field, then use **Open in Spotify**. Save the link with a preset to reuse it. Playback happens separately in Spotify; start, pause, volume, and stop remain under Spotify’s controls. No Spotify login credentials are stored by Family Cinema, no Spotify API/SDK or embedded player is used, and music is not synchronized with slides. Spotify’s [developer policy](https://developer.spotify.com/policy) explicitly excludes synchronization with slideshows. Fullscreen hides the music/preset controls; use × to return to them.
+
+Each opening loads the current selection and album contents. Reopen the slideshow to pick up changes made on another device. Selection and playback are password-free, like the rest of Photo Album.
 
 ## Movie resume positions
 
@@ -790,6 +831,18 @@ To restore the default data path, stop the service, move the current `data` dire
 | `.local` address fails | Use the Pi IP address. |
 
 ## Validation status
+
+Slideshow architecture refactor (September 27, 2026): `src/photos.rs` now contains only album/photo behavior. `src/slideshow.rs` owns slideshow migrations, default selections, playlist queries, presets, routes, and its browser asset. The photo API returns ordinary album metadata; `/api/slideshow/albums` returns selected IDs separately. All 20 Rust integration tests, six Playwright tests, formatting, Clippy, rustdoc, and diff checks pass. The Pi is deployed and healthy, and a live read-only browser check confirmed the separated APIs and unchanged UI. Deployment backup: `/home/rob/custom-plex-backups/20260927T200407Z`; rollback image: `custom-plex:before-20260927t200407z`.
+
+Small-screen slideshow update (September 27, 2026): all 20 Rust integration tests and six Playwright browser tests pass. The added 960 × 480 test verifies that the slideshow dialog scrolls internally, the page behind it remains fixed, and the sticky playback/fullscreen controls stay inside the visible viewport. The same read-only check passed against the deployed Pi. Deployment backup: `/home/rob/custom-plex-backups/20260927T192802Z`; rollback image: `custom-plex:before-20260927t192802z`.
+
+Shuffle, captions, and presets update (September 27, 2026): all 20 Rust integration tests and five browser tests pass. Formatting, Clippy, JavaScript syntax, diff checks, and warning-free rustdoc generation pass. Presets are verified across server restart and independent browser contexts; shuffle and timed/fullscreen captions are tested with real uploaded photos. The Pi is deployed and healthy, and live browser checks passed for shuffle/caption controls, preset listing, Spotify link validation, and fullscreen exit. Spotify playback is external and is not claimed as tested integration. Backup: `/home/rob/custom-plex-backups/20260927T181235Z`; rollback image: `custom-plex:before-20260927t181235z`.
+
+Slideshow options update (September 27, 2026): all four browser tests pass, including configurable timing, animation effects and duration, browser persistence, and reduced motion. JavaScript syntax and diff checks passed. The Pi deployment is healthy and live Chromium checks passed for the new selectors and fullscreen behavior. Backup: `/home/rob/custom-plex-backups/20260927T175414Z`; rollback image: `custom-plex:before-20260927t175414z`.
+
+Fullscreen follow-up (September 27, 2026): the photo now occupies the entire fullscreen viewport, with headings, captions, and toolbar hidden and a single × exit control overlaid at the upper right. All three browser tests pass, including viewport bounds, hidden controls, keyboard pause, and exit/focus behavior. The Pi is running the update and is healthy; live Chromium verification of the × control and return to the open slideshow passed. Deployment backup: `/home/rob/custom-plex-backups/20260927T070140Z`.
+
+Slideshow update (September 27, 2026): all 19 Rust integration tests and all three Playwright browser tests pass. Coverage includes selection defaults and migration, persistence after restart, validation, playlist membership after moves/deletions, real preview decoding, timed looping, pause/resume, keyboard navigation, native fullscreen, closing directly from fullscreen with focus restoration, and failure handling. Formatting, Clippy with warnings denied, warning-free rustdoc generation, and five deployment-script tests passed. The corrected update was deployed to the physical Pi; container health and live Chromium checks passed for the homepage, playlist endpoint, native fullscreen, close/focus behavior, and album selection controls. Live verification did not change household albums or selections. Actual TV-browser playback remains device-specific and has not been checked. Latest deployment backup: `/home/rob/custom-plex-backups/20260927T065455Z`; rollback image: `custom-plex:before-20260927t065455z`. The pre-feature backup is `/home/rob/custom-plex-backups/20260927T065100Z`, with image `custom-plex:before-20260927t065100z`.
 
 Compact-controls, descriptions, and resume update (September 26–27, 2026): all 17 Rust integration tests pass (seven photo/storage scenarios and ten movie/auth/streaming scenarios), including the added boundary checks documented above. Formatting, Clippy with warnings denied, JavaScript syntax checks, Python script compilation, and the repository diff check pass. The Playwright browser test passes locally in Chromium and covers compact movie/album/photo icons, hover tooltips, interface-driven descriptions and photo upload, playback event saving, and resume seeking against disposable data; GitHub Actions runs the same test. The isolated container check also verifies description and resume persistence after container recreation, but it was not rerun locally for this update. The physical Pi was deployed successfully on September 27, 2026, including the follow-up that exposes an always-visible description field on each individual photo preview. Docker and LAN health checks passed, and the deployed page contains the new **Photo description** field and save control. The latest deployment backup is `/home/rob/custom-plex-backups/20260927T011922Z`, and the rollback image is `custom-plex:before-20260927t011922z`. The existing password, media mounts, and external photo storage were retained.
 
